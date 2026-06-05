@@ -210,7 +210,7 @@ fun RegisterScreen(navController: NavController) {
             modifier = Modifier.fillMaxWidth()
         )
 
-        // --- Barra de fuerza de contraseña (solo se muestra si hay algo escrito) ---
+        // --- Barra de fuerza de contraseña solo se muestra si hay algo escrito) ---(
         if (password.isNotEmpty()) {
             Spacer(modifier = Modifier.height(8.dp))
             Row(
