@@ -44,7 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 
-// Paleta del tema oscuro premium
+
 private val fondoTop = Color(0xFF1A1340)
 private val fondoBottom = Color(0xFF0B1020)
 private val campoFondo = Color(0xFF141A2E)
@@ -94,7 +94,6 @@ fun LoginScreen(navController: NavController) {
     ) {
         Spacer(modifier = Modifier.height(48.dp))
 
-        // Logo (círculo + texto EZCHANGE)
         EzchangeLogo()
 
         Spacer(modifier = Modifier.height(40.dp))

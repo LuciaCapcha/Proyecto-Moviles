@@ -1,6 +1,7 @@
 package com.example.exchangededivisas.presentation.auth
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -38,7 +39,8 @@ fun EzchangeLogo(mostrarTexto: Boolean = true) {
                 modifier = Modifier
                     .size(82.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF0B1020)),
+                    .background(Color(0xFF0B1020))
+                    .border(2.dp, cyan.copy(alpha = 0.4f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
