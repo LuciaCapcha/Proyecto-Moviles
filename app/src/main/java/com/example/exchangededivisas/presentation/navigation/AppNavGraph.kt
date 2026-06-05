@@ -6,6 +6,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.exchangededivisas.presentation.auth.LoginScreen
 import com.example.exchangededivisas.presentation.auth.RegisterScreen
+import com.example.exchangededivisas.presentation.home.HomeScreen
+import com.example.exchangededivisas.presentation.welcome.WelcomeScreen
 
 @Composable
 fun AppNavGraph() {
@@ -13,9 +15,11 @@ fun AppNavGraph() {
 
     NavHost(
         navController = navController,
-        startDestination = "register"   // arranca DIRECTO en tu registro
+        startDestination = "welcome"
     ) {
-        composable("register") { RegisterScreen(navController) }
+        composable("welcome") { WelcomeScreen(navController) }
         composable("login") { LoginScreen(navController) }
+        composable("register") { RegisterScreen(navController) }
+        composable("home") { HomeScreen() }
     }
 }
