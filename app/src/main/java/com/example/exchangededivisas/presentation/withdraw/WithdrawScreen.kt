@@ -1,258 +1,223 @@
 package com.example.exchangededivisas.presentation.withdraw
 
-import androidx.compose.foundation.background
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.navigation.NavController
 import com.example.exchangededivisas.data.model.MockCurrencyData
+
+data class PaymentMethod(val name: String, val commission: Double)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WithdrawScreen(navController: NavController) {
-    var metodoSeleccionado by remember { mutableStateOf("PayPal") }
-    var menuMetodosDesplegado by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val currencies = MockCurrencyData.list
+    val paymentMethods = listOf(
+        PaymentMethod("PayPal (-5%)", 0.05),
+        PaymentMethod("Yape (-2%)", 0.02),
+        PaymentMethod("Plin (-2%)", 0.02),
+        PaymentMethod("Transferencia Bancaria (-1%)", 0.01)
+    )
 
-    val metodosPago = listOf("PayPal", "Visa", "Yape")
-    val comisiones = mapOf("PayPal" to 5.0, "Visa" to 3.5, "Yape" to 0.0)
+    // Estados
+    var selectedCurrencies by remember { mutableStateOf(setOf<String>()) }
+    var amounts by remember { mutableStateOf(mapOf<String, String>()) }
+    var expanded by remember { mutableStateOf(false) }
+    var selectedMethod by remember { mutableStateOf(paymentMethods[0]) }
 
-    val monedasSeleccionadas = remember { mutableStateMapOf<String, Boolean>() }
-    val montosIngresados = remember { mutableStateMapOf<String, String>() }
+    val scrollState = rememberScrollState()
 
-    var mensajeError by remember { mutableStateOf("") }
-    var mostrarVoucher by remember { mutableStateOf(false) }
-
-    if (monedasSeleccionadas.isEmpty()) {
-        MockCurrencyData.list.forEach {
-            monedasSeleccionadas[it.code] = false
-            montosIngresados[it.code] = ""
-        }
+    // Cálculos
+    val subtotal = selectedCurrencies.sumOf { code ->
+        amounts[code]?.toDoubleOrNull() ?: 0.0
     }
+    val commissionValue = subtotal * selectedMethod.commission
+    val totalToReceive = subtotal - commissionValue
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Retiro de Fondos") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
-            )
-        }
-    ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState())
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(scrollState)
+    ) {
+        // Cabecera
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Retirar Fondos de la Billetera",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
+                text = "Retirar Dinero",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
             )
-            Spacer(modifier = Modifier.height(16.dp))
+            Icon(
+                Icons.Default.Close, 
+                contentDescription = "Cerrar",
+                modifier = Modifier.clickable { navController.popBackStack() }
+            )
+        }
 
-            Text(text = "1. Selecciona el método de cobro:", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-            Spacer(modifier = Modifier.height(4.dp))
-            ExposedDropdownMenuBox(
-                expanded = menuMetodosDesplegado,
-                onExpandedChange = { menuMetodosDesplegado = !menuMetodosDesplegado },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = metodoSeleccionado,
-                    onValueChange = {},
-                    readOnly = true,
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = menuMetodosDesplegado) },
-                    modifier = Modifier.menuAnchor().fillMaxWidth(),
-                    colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
-                )
-                ExposedDropdownMenu(
-                    expanded = menuMetodosDesplegado,
-                    onDismissRequest = { menuMetodosDesplegado = false }
-                ) {
-                    metodosPago.forEach { metodo ->
-                        DropdownMenuItem(
-                            text = { Text(metodo) },
-                            onClick = {
-                                metodoSeleccionado = metodo
-                                menuMetodosDesplegado = false
+        Text(
+            text = "Selecciona las monedas y el método de cobro",
+            color = Color.Gray,
+            fontSize = 14.sp
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Monedas a Retirar",
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 8.dp)
+
+        )
+
+        // Lista de Monedas en 2 columnas
+        val chunkedCurrencies = currencies.chunked(2)
+        chunkedCurrencies.forEach { pair ->
+            Row(modifier = Modifier.fillMaxWidth()) {
+                pair.forEach { currency ->
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = selectedCurrencies.contains(currency.code),
+                            onCheckedChange = { isChecked ->
+                                selectedCurrencies = if (isChecked) {
+                                    selectedCurrencies + currency.code
+                                } else {
+                                    selectedCurrencies - currency.code
+                                }
                             }
+                        )
+                        Text(
+                            text = "${currency.code} (${String.format("%.2f", currency.balance)})",
+                            fontSize = 13.sp
                         )
                     }
                 }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(text = "2. Selecciona las monedas y montos a retirar:", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-            Spacer(modifier = Modifier.height(8.dp))
-
-            MockCurrencyData.list.forEach { currency ->
-                val estaMarcado = monedasSeleccionadas[currency.code] ?: false
-                val montoActual = montosIngresados[currency.code] ?: ""
-
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Checkbox(
-                                checked = estaMarcado,
-                                onCheckedChange = { marcado ->
-                                    monedasSeleccionadas[currency.code] = marcado
-                                    if (!marcado) montosIngresados[currency.code] = ""
-                                }
-                            )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(text = "${currency.code} - ${currency.name}", fontWeight = FontWeight.Bold)
-                                Text(text = "Saldo disponible: ${"%.2f".format(currency.balance)}", fontSize = 12.sp, color = Color.Gray)
-                            }
-                        }
-
-                        if (estaMarcado) {
-                            OutlinedTextField(
-                                value = montoActual,
-                                onValueChange = { montosIngresados[currency.code] = it },
-                                label = { Text("Monto a retirar en ${currency.code}") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                singleLine = true,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 8.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (mensajeError.isNotBlank()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(text = mensajeError, color = Color(0xFFEF4444), fontWeight = FontWeight.Medium, fontSize = 14.sp)
-            }
-
-            Spacer(modifier = Modifier.weight(1f))
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Button(
-                onClick = {
-                    val ningunaSeleccionada = monedasSeleccionadas.values.none { it }
-                    if (ningunaSeleccionada) {
-                        mensajeError = "Debes seleccionar al menos una moneda."
-                        return@Button
-                    }
-
-                    var algunMontoInvalido = false
-                    var saldoInsuficiente = false
-
-                    monedasSeleccionadas.forEach { (code, marcado) ->
-                        if (marcado) {
-                            val montoDouble = montosIngresados[code]?.toDoubleOrNull()
-                            val originalCurrency = MockCurrencyData.list.firstOrNull { it.code == code }
-
-                            if (montoDouble == null || montoDouble <= 0) {
-                                algunMontoInvalido = true
-                            } else if (originalCurrency != null && montoDouble > originalCurrency.balance) {
-                                saldoInsuficiente = true
-                            }
-                        }
-                    }
-
-                    if (algunMontoInvalido) {
-                        mensajeError = "Monto inválido"
-                    } else if (saldoInsuficiente) {
-                        mensajeError = "Saldo insuficiente en una o más monedas."
-                    } else {
-                        mensajeError = ""
-                        mostrarVoucher = true
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(text = "Revisar Retiro", fontSize = 16.sp)
+                if (pair.size < 2) Spacer(modifier = Modifier.weight(1f))
             }
         }
-    }
 
-    if (mostrarVoucher) {
-        val comisionFija = comisiones[metodoSeleccionado] ?: 0.0
+        if (selectedCurrencies.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(text = "Montos", fontWeight = FontWeight.Bold)
 
-        AlertDialog(
-            onDismissRequest = { mostrarVoucher = false },
-            title = { Text("Resumen del Retiro") },
-            text = {
-                Column {
-                    Text(text = "Método de cobro: $metodoSeleccionado", fontWeight = FontWeight.Medium)
-                    Text(text = "Comisión del servicio: $ $comisionFija USD", color = Color(0xFFEF4444), fontSize = 13.sp)
-                    Spacer(modifier = Modifier.height(12.dp))
+            selectedCurrencies.forEach { code ->
+                val amount = amounts[code] ?: ""
+                val isInvalid = amount.toDoubleOrNull()?.let { it > (currencies.find { c -> c.code == code }?.balance ?: 0.0) } ?: false
 
-                    Text(text = "Desglose por Moneda:", fontWeight = FontWeight.Bold)
-                    monedasSeleccionadas.forEach { (code, marcado) ->
-                        if (marcado) {
-                            val monto = montosIngresados[code]?.toDoubleOrNull() ?: 0.0
-                            Text(text = "• $code: ${"%.2f".format(monto)}", modifier = Modifier.padding(start = 8.dp))
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Al confirmar, el voucher se enviará a tu correo registrado y el saldo se actualizará.",
-                        fontSize = 11.sp,
-                        color = Color.Gray
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        monedasSeleccionadas.forEach { (code, marcado) ->
-                            if (marcado) {
-                                val montoADescontar = montosIngresados[code]?.toDoubleOrNull() ?: 0.0
-                                val index = MockCurrencyData.list.indexOfFirst { it.code == code }
-
-                                if (index != -1) {
-                                    try {
-                                        val moneda = MockCurrencyData.list[index]
-                                    } catch (e: Exception) {
-                                        e.printStackTrace()
-                                    }
-                                }
-                            }
-                        }
-
-                        mostrarVoucher = false
-                        navController.popBackStack()
-                    }
-                ) {
-                    Text("Confirmar Retiro")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { mostrarVoucher = false }) {
-                    Text("Cancelar")
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = { newValue ->
+                        amounts = amounts + (code to newValue)
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    label = { Text("Monto en $code") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    isError = isInvalid
+                )
+                if (isInvalid) {
+                    Text("Monto excede el saldo", color = Color.Red, fontSize = 12.sp)
                 }
             }
-        )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(text = "Método de Cobro", fontWeight = FontWeight.Bold)
+        
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = !expanded },
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+        ) {
+            OutlinedTextField(
+                value = selectedMethod.name,
+                onValueChange = {},
+                readOnly = true,
+                modifier = Modifier.menuAnchor().fillMaxWidth(),
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
+            )
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                paymentMethods.forEach { method ->
+                    DropdownMenuItem(
+                        text = { Text(method.name) },
+                        onClick = {
+                            selectedMethod = method
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+
+        if (subtotal > 0) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F2F5)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Subtotal:", fontSize = 14.sp)
+                        Text("${String.format("%.2f", subtotal)}", fontWeight = FontWeight.Medium)
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Comisión (${(selectedMethod.commission * 100).toInt()}%):", fontSize = 14.sp)
+                        Text("${String.format("%.2f", commissionValue)}", fontWeight = FontWeight.Medium)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Total a recibir:", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text("${String.format("%.2f", totalToReceive)}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Button(
+            onClick = {
+                Toast.makeText(context, "Retiro realizado con éxito", Toast.LENGTH_SHORT).show()
+                navController.navigate("wallet") {
+                    popUpTo("home") { inclusive = false }
+                }
+            },
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            enabled = subtotal > 0 && selectedCurrencies.all { code -> 
+                val amount = amounts[code]?.toDoubleOrNull() ?: 0.0
+                amount > 0 && amount <= (currencies.find { c -> c.code == code }?.balance ?: 0.0)
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1C2E)) // Azul oscuro como la imagen
+        ) {
+            Text("Confirmar Retiro", color = Color.White)
+        }
     }
 }

@@ -15,8 +15,11 @@ import com.example.exchangededivisas.presentation.transactions.TransactionsScree
 import com.example.exchangededivisas.presentation.wallet.WalletScreen
 import com.example.exchangededivisas.presentation.welcome.WelcomeScreen
 import com.example.exchangededivisas.presentation.deposit.DepositScreen
+import com.example.exchangededivisas.presentation.pairs.PairDetailScreen
+import com.example.exchangededivisas.presentation.pairs.PairsScreen
 import com.example.exchangededivisas.presentation.withdraw.WithdrawScreen
 import com.example.exchangededivisas.presentation.trade.InstantBuyScreen
+import com.example.exchangededivisas.presentation.trade.InstantSaleScreen
 
 @Composable
 fun AppNavGraph() {
@@ -40,12 +43,22 @@ fun AppNavGraph() {
         // --- Pantallas CON barra de navegación (las 7 opciones del usuario común) ---
         composable("home") { MainScaffold(navController) { HomeScreen() } }
         composable("wallet") { MainScaffold(navController) { WalletScreen(navController) } }
-        composable("currencies") { MainScaffold(navController) { CurrenciesScreen(navController) } }
+        composable("currencies") { MainScaffold(navController) { PairsScreen(navController) } }
         composable("transactions") { MainScaffold(navController) { TransactionsScreen() } }
         composable("history") { MainScaffold(navController) { HistoryScreen() } }
         composable("settings") { MainScaffold(navController) { SettingsScreen() } }
         composable("deposit") { MainScaffold(navController) { DepositScreen() } }
-        composable("withdraw") { MainScaffold(navController) { WithdrawScreen() } }
+        composable("withdraw") { MainScaffold(navController) { WithdrawScreen(navController) } }
         composable("instantBuy") { MainScaffold(navController) { InstantBuyScreen() } }
+        composable("ventaInmediata/{code}") { backStackEntry ->
+            val code = backStackEntry.arguments?.getString("code") ?: "USD/PEN"
+            InstantSaleScreen(navController, code)
+        }
+        composable("pairs") { MainScaffold(navController) { PairsScreen(navController) } }
+        composable("pairDetail/{code}") { backStackEntry ->
+            val code = backStackEntry.arguments?.getString("code") ?: ""
+            MainScaffold(navController) { PairDetailScreen(navController, code) }
+        }
+
     }
 }
