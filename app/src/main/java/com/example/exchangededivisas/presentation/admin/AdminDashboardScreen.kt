@@ -66,7 +66,7 @@ fun AdminDashboardScreen(navController: NavController, userRole: String = "ADM")
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp
                 )
-                Divider()
+                HorizontalDivider()
 
                 NavigationDrawerItem(
                     icon = { Icon(Icons.Default.Analytics, contentDescription = null) },
@@ -225,7 +225,7 @@ fun GestionUsuarios() {
                 readOnly = true,
                 label = { Text("Estado de cuenta") },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = unirseOpcionesDesplegadas) },
-                modifier = Modifier.menuAnchor().fillMaxWidth(),
+                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth(),
                 colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
             )
             ExposedDropdownMenu(
@@ -239,7 +239,7 @@ fun GestionUsuarios() {
         }
 
         Spacer(modifier = Modifier.height(16.dp))
-        Divider()
+        HorizontalDivider()
         Spacer(modifier = Modifier.height(16.dp))
 
         // --- LISTA ---

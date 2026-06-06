@@ -10,6 +10,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.MenuAnchorType
 import androidx.navigation.NavController
 
 data class CurrencyPair(
@@ -81,7 +82,7 @@ fun PairsScreen(navController: NavController) {
                 readOnly = true,
                 label = { Text("Moneda a ofrecer") },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedFrom) },
-                modifier = Modifier.menuAnchor().fillMaxWidth()
+                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth()
             )
             DropdownMenu(expanded = expandedFrom, onDismissRequest = { expandedFrom = false }) {
                 currencies.forEach { currency ->
@@ -109,7 +110,7 @@ fun PairsScreen(navController: NavController) {
                 readOnly = true,
                 label = { Text("Moneda a recibir") },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedTo) },
-                modifier = Modifier.menuAnchor().fillMaxWidth()
+                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth()
             )
             DropdownMenu(expanded = expandedTo, onDismissRequest = { expandedTo = false }) {
                 currencies.forEach { currency ->
