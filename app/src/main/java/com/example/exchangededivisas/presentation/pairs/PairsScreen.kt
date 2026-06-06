@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
@@ -134,37 +135,41 @@ fun PairsScreen(navController: NavController) {
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             Button(
-                onClick = { selectedButton = if (selectedButton == "Volumen") null else "Volumen" },
+                onClick = { selectedButton = "Volumen" },
                 modifier = Modifier.weight(1f),
-                colors = if (selectedButton == "Volumen")
-                    ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                else ButtonDefaults.buttonColors()
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (selectedButton == "Volumen") MaterialTheme.colorScheme.primary else Color.LightGray,
+                    contentColor = if (selectedButton == "Volumen") Color.White else Color.Black
+                )
             ) { Text("Volumen ↓") }
 
             Button(
-                onClick = { selectedButton = if (selectedButton == "Compra") null else "Compra" },
+                onClick = { selectedButton = "Compra" },
                 modifier = Modifier.weight(1f),
-                colors = if (selectedButton == "Compra")
-                    ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                else ButtonDefaults.buttonColors()
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (selectedButton == "Compra") MaterialTheme.colorScheme.primary else Color.LightGray,
+                    contentColor = if (selectedButton == "Compra") Color.White else Color.Black
+                )
             ) { Text("Compra") }
         }
         Spacer(modifier = Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             Button(
-                onClick = { selectedButton = if (selectedButton == "Venta") null else "Venta" },
+                onClick = { selectedButton = "Venta" },
                 modifier = Modifier.weight(1f),
-                colors = if (selectedButton == "Venta")
-                    ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                else ButtonDefaults.buttonColors()
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (selectedButton == "Venta") MaterialTheme.colorScheme.primary else Color.LightGray,
+                    contentColor = if (selectedButton == "Venta") Color.White else Color.Black
+                )
             ) { Text("Venta") }
 
             Button(
-                onClick = { selectedButton = if (selectedButton == "Margen") null else "Margen" },
+                onClick = { selectedButton = "Margen" },
                 modifier = Modifier.weight(1f),
-                colors = if (selectedButton == "Margen")
-                    ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                else ButtonDefaults.buttonColors()
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (selectedButton == "Margen") MaterialTheme.colorScheme.primary else Color.LightGray,
+                    contentColor = if (selectedButton == "Margen") Color.White else Color.Black
+                )
             ) { Text("Margen") }
         }
 
