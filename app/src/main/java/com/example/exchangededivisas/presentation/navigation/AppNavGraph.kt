@@ -45,7 +45,7 @@ fun AppNavGraph() {
         composable("history") { MainScaffold(navController) { HistoryScreen() } }
         composable("settings") { MainScaffold(navController) { SettingsScreen() } }
         composable("deposit") { MainScaffold(navController) { DepositScreen() } }
-        composable("withdraw") { MainScaffold(navController) { WithdrawScreen() } }
+        composable("withdraw") { WithdrawScreen(navController = navController)  }
         composable("instantBuy") { MainScaffold(navController) { InstantBuyScreen() } }
     }
 }
