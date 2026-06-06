@@ -6,13 +6,17 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.example.exchangededivisas.presentation.navigation.AppNavGraph
 import com.example.exchangededivisas.ui.theme.ExchangedeDivisasTheme
+import com.example.exchangededivisas.ui.theme.ThemeState
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            ExchangedeDivisasTheme {
+            ExchangedeDivisasTheme(
+                darkTheme = ThemeState.isDarkMode,
+                dynamicColor = false
+            ) {
                 AppNavGraph()
             }
         }
