@@ -10,6 +10,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
@@ -19,6 +23,8 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -35,6 +41,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
+// Importación del Mock de datos que definiste en CurrencyModel.kt
+import com.example.exchangededivisas.data.model.MockCurrencyData
 
 data class NavItem(
     val route: String,
@@ -54,6 +62,45 @@ private val navItems = listOf(
 )
 
 @Composable
+fun WalletTopBar() {
+    val activeCurrencies = MockCurrencyData.list.filter { it.balance > 0 }
+
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .statusBarsPadding() // <-- AGREGA ESTA LÍNEA AQUÍ
+            .padding(vertical = 10.dp, horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        items(activeCurrencies) { currency ->
+            Card(
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = currency.code,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "$${currency.balance}",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+    }
+}
+@Composable
 fun MainScaffold(
     navController: NavController,
     content: @Composable () -> Unit
@@ -62,6 +109,10 @@ fun MainScaffold(
     val currentRoute = backStackEntry?.destination?.route
 
     Scaffold(
+        topBar = {
+            // Se agrega tu carrusel superior táctil en todas las pantallas de este Scaffold
+            WalletTopBar()
+        },
         bottomBar = {
             // Barra en filas de 4 (porque son 7 opciones)
             Column(
