@@ -59,4 +59,19 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.9.8")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.compose.material:material-icons-extended")
+    // Retrofit
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+// Gson
+    implementation("com.google.code.gson:gson:2.10")
+// OkHttp (para logging)
+    implementation("com.squareup.okhttp3:okhttp:4.9.3")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.9.3")
+
+    // Fragment
+    implementation("androidx.fragment:fragment-ktx:1.5.7")
+// AppCompat
+    implementation("androidx.appcompat:appcompat:1.6.1")
+// Material Design
+    implementation("com.google.android.material:material:1.9.0")
 }
