@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.exchangededivisas.presentation.admin.AdminDashboardScreen
 import com.example.exchangededivisas.presentation.auth.LoginScreen
 import com.example.exchangededivisas.presentation.auth.RegisterScreen
 import com.example.exchangededivisas.presentation.currencies.CurrenciesScreen
@@ -27,7 +28,13 @@ fun AppNavGraph() {
         composable("login") { LoginScreen(navController) }
         composable("register") { RegisterScreen(navController) }
 
-        // --- Pantallas CON barra de navegación (las 7 opciones) ---
+        // --- Panel Administrativo (Tiene su propia barra lateral, va independiente) ---
+        composable("admin_dashboard") {
+            // Criterio de aceptación: Validación de rol restringido a ADM
+            AdminDashboardScreen(navController = navController, userRole = "ADM")
+        }
+
+        // --- Pantallas CON barra de navegación (las 7 opciones del usuario común) ---
         composable("home") { MainScaffold(navController) { HomeScreen() } }
         composable("wallet") { MainScaffold(navController) { WalletScreen() } }
         composable("currencies") { MainScaffold(navController) { CurrenciesScreen() } }
