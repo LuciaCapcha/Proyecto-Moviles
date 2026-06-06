@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.MenuAnchorType
 import androidx.navigation.NavController
 import com.example.exchangededivisas.data.model.MockCurrencyData
 
@@ -156,7 +157,7 @@ fun WithdrawScreen(navController: NavController) {
                 value = selectedMethod.name,
                 onValueChange = {},
                 readOnly = true,
-                modifier = Modifier.menuAnchor().fillMaxWidth(),
+                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth(),
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                 colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
             )
