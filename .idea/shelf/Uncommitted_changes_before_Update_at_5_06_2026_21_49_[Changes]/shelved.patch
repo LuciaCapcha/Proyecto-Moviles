@@ -1,0 +1,133 @@
+Index: app/src/main/java/com/example/exchangededivisas/presentation/navigation/AppNavGraph.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.example.exchangededivisas.presentation.navigation\r\n\r\nimport androidx.compose.runtime.Composable\r\nimport androidx.navigation.compose.NavHost\r\nimport androidx.navigation.compose.composable\r\nimport androidx.navigation.compose.rememberNavController\r\nimport com.example.exchangededivisas.presentation.auth.LoginScreen\r\nimport com.example.exchangededivisas.presentation.auth.RegisterScreen\r\nimport com.example.exchangededivisas.presentation.currencies.CurrenciesScreen\r\nimport com.example.exchangededivisas.presentation.history.HistoryScreen\r\nimport com.example.exchangededivisas.presentation.home.HomeScreen\r\nimport com.example.exchangededivisas.presentation.settings.SettingsScreen\r\nimport com.example.exchangededivisas.presentation.transactions.TransactionsScreen\r\nimport com.example.exchangededivisas.presentation.wallet.WalletScreen\r\nimport com.example.exchangededivisas.presentation.welcome.WelcomeScreen\r\n\r\n@Composable\r\nfun AppNavGraph() {\r\n    val navController = rememberNavController()\r\n\r\n    NavHost(\r\n        navController = navController,\r\n        startDestination = \"welcome\"\r\n    ) {\r\n        // --- Pantallas SIN barra de navegación ---\r\n        composable(\"welcome\") { WelcomeScreen(navController) }\r\n        composable(\"login\") { LoginScreen(navController) }\r\n        composable(\"register\") { RegisterScreen(navController) }\r\n\r\n        // --- Pantallas CON barra de navegación (las 7 opciones) ---\r\n        composable(\"home\") { MainScaffold(navController) { HomeScreen() } }\r\n        composable(\"wallet\") { MainScaffold(navController) { WalletScreen() } }\r\n        composable(\"currencies\") { MainScaffold(navController) { CurrenciesScreen() } }\r\n        composable(\"transactions\") { MainScaffold(navController) { TransactionsScreen() } }\r\n        composable(\"history\") { MainScaffold(navController) { HistoryScreen() } }\r\n        composable(\"settings\") { MainScaffold(navController) { SettingsScreen() } }\r\n    }\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/exchangededivisas/presentation/navigation/AppNavGraph.kt b/app/src/main/java/com/example/exchangededivisas/presentation/navigation/AppNavGraph.kt
+--- a/app/src/main/java/com/example/exchangededivisas/presentation/navigation/AppNavGraph.kt	(revision 383adc04a5e99e921ff4002879519e74328cfffa)
++++ b/app/src/main/java/com/example/exchangededivisas/presentation/navigation/AppNavGraph.kt	(date 1780712596116)
+@@ -13,6 +13,8 @@
+ import com.example.exchangededivisas.presentation.transactions.TransactionsScreen
+ import com.example.exchangededivisas.presentation.wallet.WalletScreen
+ import com.example.exchangededivisas.presentation.welcome.WelcomeScreen
++import com.example.exchangededivisas.presentation.deposit.DepositScreen
++import com.example.exchangededivisas.presentation.withdraw.WithdrawScreen
+ 
+ @Composable
+ fun AppNavGraph() {
+@@ -29,10 +31,12 @@
+ 
+         // --- Pantallas CON barra de navegación (las 7 opciones) ---
+         composable("home") { MainScaffold(navController) { HomeScreen() } }
+-        composable("wallet") { MainScaffold(navController) { WalletScreen() } }
++        composable("wallet") { MainScaffold(navController) { WalletScreen(navController) } }
+         composable("currencies") { MainScaffold(navController) { CurrenciesScreen() } }
+         composable("transactions") { MainScaffold(navController) { TransactionsScreen() } }
+         composable("history") { MainScaffold(navController) { HistoryScreen() } }
+         composable("settings") { MainScaffold(navController) { SettingsScreen() } }
++        composable("deposit") { MainScaffold(navController) { DepositScreen() } }
++        composable("withdraw") { MainScaffold(navController) { WithdrawScreen() } }
+     }
+ }
+\ No newline at end of file
+Index: app/src/main/java/com/example/exchangededivisas/data/model/CurrencyModel.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.example.exchangededivisas.data.model\r\n\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/exchangededivisas/data/model/CurrencyModel.kt b/app/src/main/java/com/example/exchangededivisas/data/model/CurrencyModel.kt
+--- a/app/src/main/java/com/example/exchangededivisas/data/model/CurrencyModel.kt	(revision 383adc04a5e99e921ff4002879519e74328cfffa)
++++ b/app/src/main/java/com/example/exchangededivisas/data/model/CurrencyModel.kt	(date 1780714118715)
+@@ -1,2 +1,39 @@
+ package com.example.exchangededivisas.data.model
+ 
++data class CurrencyModel(
++    val code: String,
++    val name: String,
++    val balance: Double
++)
++
++val sampleWalletCurrencies = listOf(
++    CurrencyModel("USD", "Dólar estadounidense", 2500.00),
++    CurrencyModel("PEN", "Sol peruano", 1850.50),
++    CurrencyModel("EUR", "Euro", 920.00),
++    CurrencyModel("GBP", "Libra esterlina", 500.00),
++    CurrencyModel("BRL", "Real brasileño", 300.00),
++    CurrencyModel("MXN", "Peso mexicano", 240.00),
++    CurrencyModel("CAD", "Dólar canadiense", 100.00),
++    CurrencyModel("JPY", "Yen japonés", 0.00),
++    CurrencyModel("CHF", "Franco suizo", 0.00),
++    CurrencyModel("HKD", "Dólar de Hong Kong", 0.00),
++    CurrencyModel("CNY", "Yuan chino", 0.00),
++    CurrencyModel("AUD", "Dólar australiano", 0.00),
++    CurrencyModel("RUB", "Rublo ruso", 0.00),
++    CurrencyModel("ARS", "Peso argentino", 0.00),
++    CurrencyModel("BOB", "Boliviano", 0.00),
++    CurrencyModel("CLP", "Peso chileno", 0.00),
++    CurrencyModel("COP", "Peso colombiano", 0.00),
++    CurrencyModel("CRC", "Colón costarricense", 0.00),
++    CurrencyModel("CUP", "Peso cubano", 0.00),
++    CurrencyModel("GTQ", "Quetzal guatemalteco", 0.00),
++    CurrencyModel("HNL", "Lempira hondureño", 0.00),
++    CurrencyModel("NIO", "Córdoba nicaragüense", 0.00),
++    CurrencyModel("PAB", "Balboa panameño", 0.00),
++    CurrencyModel("PYG", "Guaraní paraguayo", 0.00),
++    CurrencyModel("DOP", "Peso dominicano", 0.00),
++    CurrencyModel("UYU", "Peso uruguayo", 0.00),
++    CurrencyModel("HTG", "Gourde haitiano", 0.00),
++    CurrencyModel("SRD", "Dólar surinamés", 0.00),
++    CurrencyModel("VES", "Bolívar venezolano", 0.00)
++)
+\ No newline at end of file
+Index: app/src/main/java/com/example/exchangededivisas/presentation/withdraw/WithdrawScreen.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/exchangededivisas/presentation/withdraw/WithdrawScreen.kt b/app/src/main/java/com/example/exchangededivisas/presentation/withdraw/WithdrawScreen.kt
+new file mode 100644
+--- /dev/null	(date 1780712559799)
++++ b/app/src/main/java/com/example/exchangededivisas/presentation/withdraw/WithdrawScreen.kt	(date 1780712559799)
+@@ -0,0 +1,2 @@
++package com.example.exchangededivisas.presentation.withdraw
++
+Index: app/src/main/java/com/example/exchangededivisas/presentation/trade/InstantBuyScreen.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/exchangededivisas/presentation/trade/InstantBuyScreen.kt b/app/src/main/java/com/example/exchangededivisas/presentation/trade/InstantBuyScreen.kt
+new file mode 100644
+--- /dev/null	(date 1780712652268)
++++ b/app/src/main/java/com/example/exchangededivisas/presentation/trade/InstantBuyScreen.kt	(date 1780712652268)
+@@ -0,0 +1,2 @@
++package com.example.exchangededivisas.presentation.trade
++
+Index: app/src/main/java/com/example/exchangededivisas/presentation/trade/PairDetailScreen.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/exchangededivisas/presentation/trade/PairDetailScreen.kt b/app/src/main/java/com/example/exchangededivisas/presentation/trade/PairDetailScreen.kt
+new file mode 100644
+--- /dev/null	(date 1780712658968)
++++ b/app/src/main/java/com/example/exchangededivisas/presentation/trade/PairDetailScreen.kt	(date 1780712658968)
+@@ -0,0 +1,2 @@
++package com.example.exchangededivisas.presentation.trade
++
+Index: app/src/main/java/com/example/exchangededivisas/presentation/deposit/DepositScreen.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/exchangededivisas/presentation/deposit/DepositScreen.kt b/app/src/main/java/com/example/exchangededivisas/presentation/deposit/DepositScreen.kt
+new file mode 100644
+--- /dev/null	(date 1780712531408)
++++ b/app/src/main/java/com/example/exchangededivisas/presentation/deposit/DepositScreen.kt	(date 1780712531408)
+@@ -0,0 +1,2 @@
++package com.example.exchangededivisas.presentation.deposit
++
