@@ -87,6 +87,7 @@ fun WithdrawScreen(navController: NavController) {
             text = "Monedas a Retirar",
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 8.dp)
+
         )
 
         // Lista de Monedas en 2 columnas
