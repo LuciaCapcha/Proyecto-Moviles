@@ -52,11 +52,6 @@ dependencies {
     // Charts
     implementation(libs.mpandroidchart)
 
-    // Navigation & Image loading
-    implementation("androidx.navigation:navigation-compose:2.8.3")
-    implementation("io.coil-kt:coil-compose:2.7.0")
-    implementation("androidx.compose.material:material-icons-extended")
-
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -68,7 +63,10 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.9.8")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.mpandroidchart)
+
+
 }
-}
+
 

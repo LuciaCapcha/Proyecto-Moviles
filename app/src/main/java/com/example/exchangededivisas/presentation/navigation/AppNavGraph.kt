@@ -19,6 +19,7 @@ import com.example.exchangededivisas.presentation.pairs.PairDetailScreen
 import com.example.exchangededivisas.presentation.pairs.PairsScreen
 import com.example.exchangededivisas.presentation.withdraw.WithdrawScreen
 import com.example.exchangededivisas.presentation.trade.InstantBuyScreen
+import com.example.exchangededivisas.presentation.trade.InstantSaleScreen
 
 @Composable
 fun AppNavGraph() {
@@ -49,6 +50,10 @@ fun AppNavGraph() {
         composable("deposit") { MainScaffold(navController) { DepositScreen() } }
         composable("withdraw") { MainScaffold(navController) { WithdrawScreen(navController) } }
         composable("instantBuy") { MainScaffold(navController) { InstantBuyScreen() } }
+        composable("ventaInmediata/{code}") { backStackEntry ->
+            val code = backStackEntry.arguments?.getString("code") ?: "USD/PEN"
+            InstantSaleScreen(navController, code)
+        }
         composable("pairs") { MainScaffold(navController) { PairsScreen(navController) } }
         composable("pairDetail/{code}") { backStackEntry ->
             val code = backStackEntry.arguments?.getString("code") ?: ""
