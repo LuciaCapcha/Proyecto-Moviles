@@ -38,7 +38,14 @@ fun AppNavGraph() {
         }
 
         // --- Pantallas CON barra de navegación (las 7 opciones del usuario común) ---
-        composable("home") { MainScaffold(navController) { HomeScreen() } }
+        composable("home") {
+            MainScaffold(navController) {
+                HomeScreen(
+                    onNavigateToLogin = { navController.navigate("login") },
+                    onNavigateToRegister = { navController.navigate("register") }
+                )
+            }
+        }
         composable("wallet") { MainScaffold(navController) { WalletScreen(navController) } }
         composable("currencies") { MainScaffold(navController) { CurrenciesScreen(navController) } }
         composable("transactions") { MainScaffold(navController) { TransactionsScreen() } }
