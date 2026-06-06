@@ -16,6 +16,7 @@ import com.example.exchangededivisas.presentation.wallet.WalletScreen
 import com.example.exchangededivisas.presentation.welcome.WelcomeScreen
 import com.example.exchangededivisas.presentation.deposit.DepositScreen
 import com.example.exchangededivisas.presentation.withdraw.WithdrawScreen
+import com.example.exchangededivisas.presentation.trade.InstantBuyScreen
 
 @Composable
 fun AppNavGraph() {
@@ -39,11 +40,12 @@ fun AppNavGraph() {
         // --- Pantallas CON barra de navegación (las 7 opciones del usuario común) ---
         composable("home") { MainScaffold(navController) { HomeScreen() } }
         composable("wallet") { MainScaffold(navController) { WalletScreen(navController) } }
-        composable("currencies") { MainScaffold(navController) { CurrenciesScreen() } }
+        composable("currencies") { MainScaffold(navController) { CurrenciesScreen(navController) } }
         composable("transactions") { MainScaffold(navController) { TransactionsScreen() } }
         composable("history") { MainScaffold(navController) { HistoryScreen() } }
         composable("settings") { MainScaffold(navController) { SettingsScreen() } }
         composable("deposit") { MainScaffold(navController) { DepositScreen() } }
         composable("withdraw") { MainScaffold(navController) { WithdrawScreen() } }
+        composable("instantBuy") { MainScaffold(navController) { InstantBuyScreen() } }
     }
 }
