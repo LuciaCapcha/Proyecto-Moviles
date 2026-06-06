@@ -61,9 +61,14 @@ fun LoginScreen(navController: NavController) {
     var passwordVisible by remember { mutableStateOf(false) }
     var mantenerSesion by remember { mutableStateOf(true) }
 
+    // Credenciales de usuario común
     val usuarioValido = "lucia"
     val correoValido = "lucia@esan.edu.pe"
     val passwordValido = "12345678"
+
+    // Credenciales de Administrador para tu Historia de Usuario (US-018)
+    val adminUsuario = "admin"
+    val adminPassword = "admin123"
 
     val isFormValid = identifier.isNotBlank() && password.isNotBlank()
 
@@ -166,13 +171,20 @@ fun LoginScreen(navController: NavController) {
 
         Button(
             onClick = {
-                val ok = (identifier == usuarioValido || identifier == correoValido) &&
-                        password == passwordValido
-                if (ok) {
+                // 1. Verificación del Rol Administrador (Criterio de Aceptación)
+                if (identifier == adminUsuario && password == adminPassword) {
+                    navController.navigate("admin_dashboard") {
+                        popUpTo("login") { inclusive = true }
+                    }
+                }
+                // 2. Verificación de Usuario Común
+                else if ((identifier == usuarioValido || identifier == correoValido) && password == passwordValido) {
                     navController.navigate("home") {
                         popUpTo("login") { inclusive = true }
                     }
-                } else {
+                }
+                // 3. Error si no coincide ninguna credencial
+                else {
                     error = "Credenciales inválidas"
                 }
             },
