@@ -1,34 +1,49 @@
 package com.example.exchangededivisas.presentation.pairs
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.example.exchangededivisas.data.model.CurrencyPairChartData
 import com.example.exchangededivisas.data.model.HistoricalPrice
+import com.example.exchangededivisas.data.model.MockCurrencyData
 import com.example.exchangededivisas.presentation.home.HistoricalChartCard
 import java.time.LocalDateTime
 import kotlin.random.Random
 
 @Composable
 fun PairDetailScreen(navController: NavController, code: String) {
+    val context = LocalContext.current
     var selectedFilter by remember { mutableStateOf("1d") }
     var showOperations by remember { mutableStateOf(false) }
+    var showSellOfferDialog by remember { mutableStateOf(false) }
 
     val cleanCode = code.replace("_", "/")
     val codes = cleanCode.split("/")
     val base = codes.getOrNull(0) ?: "USD"
     val quote = codes.getOrNull(1) ?: "PEN"
 
-    // Generar datos simulados según el filtro, igual que en el Home
+    // Simulación de saldo (del MockCurrencyData)
+    var userBalance by remember { 
+        mutableStateOf(MockCurrencyData.list.find { it.code == base }?.balance ?: 0.0) 
+    }
+
+    // Generar datos simulados según el filtro
     val chartData = remember(selectedFilter, code) {
         val prices = mutableListOf<HistoricalPrice>()
         val count = when(selectedFilter) {
@@ -39,31 +54,37 @@ fun PairDetailScreen(navController: NavController, code: String) {
             else -> 50
         }
         val now = LocalDateTime.now()
-        
-        // Semilla basada en el par para que sea consistente
-        val seed = code.hashCode().toLong()
-        val random = Random(seed)
+        val random = Random(code.hashCode().toLong())
         var lastPrice = 3.7 + random.nextDouble(-0.2, 0.2)
 
         for (i in count downTo 0) {
-            val time = when(selectedFilter) {
-                "1d" -> now.minusHours(i.toLong())
-                "1w" -> now.minusDays(i.toLong())
-                "1m" -> now.minusDays(i.toLong())
-                "1y" -> now.minusMonths(i.toLong())
-                else -> now.minusDays(i.toLong())
-            }
+            val time = now.minusHours(i.toLong())
             lastPrice += random.nextDouble(-0.05, 0.05)
-            val buyPrice = lastPrice
-            val sellPrice = lastPrice + 0.02 + random.nextDouble(0.01, 0.05)
-            prices.add(HistoricalPrice(time, buyPrice, sellPrice))
+            prices.add(HistoricalPrice(time, lastPrice, lastPrice + 0.04))
         }
         CurrencyPairChartData(base, quote, prices)
     }
 
-    val maxBuy = chartData.prices.maxByOrNull { it.buyPrice }?.buyPrice ?: 0.0
     val minSell = chartData.prices.minByOrNull { it.sellPrice }?.sellPrice ?: 0.0
-    val avgMargin = chartData.prices.map { it.sellPrice - it.buyPrice }.average()
+
+    // Lista local para mostrar progreso de ofertas generadas
+    var localSellOffers by remember { mutableStateOf(listOf<String>()) }
+
+    if (showSellOfferDialog) {
+        SellOfferDialog(
+            baseCurrency = base,
+            quoteCurrency = quote,
+            currentMinSell = minSell,
+            availableBalance = userBalance,
+            onDismiss = { showSellOfferDialog = false },
+            onConfirm = { amount, price ->
+                userBalance -= amount
+                localSellOffers = localSellOffers + "$amount $base a $price $quote"
+                showSellOfferDialog = false
+                Toast.makeText(context, "Oferta generada. Se envió notificación al correo.", Toast.LENGTH_LONG).show()
+            }
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -72,12 +93,11 @@ fun PairDetailScreen(navController: NavController, code: String) {
             .verticalScroll(rememberScrollState())
     ) {
         Text(
-            text = "Detalle de par: $code",
+            text = "Detalle de par: $cleanCode",
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.padding(bottom = 16.dp)
         )
 
-        // Usamos el componente de gráfico del Home para consistencia
         HistoricalChartCard(
             title = "Evolución del Par",
             data = chartData,
@@ -85,68 +105,53 @@ fun PairDetailScreen(navController: NavController, code: String) {
             onRangeSelected = { selectedFilter = it }
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-        // Card de Resumen de Precios
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Mayor Precio", color = Color(0xFF2563EB), style = MaterialTheme.typography.labelMedium)
-                    Text("Compra", color = Color(0xFF2563EB), style = MaterialTheme.typography.labelSmall)
-                    Text("%.4f".format(maxBuy), fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Menor Precio", color = Color(0xFF16A34A), style = MaterialTheme.typography.labelMedium)
-                    Text("Venta", color = Color(0xFF16A34A), style = MaterialTheme.typography.labelSmall)
-                    Text("%.4f".format(minSell), fontWeight = FontWeight.Bold, color = Color(0xFF16A34A))
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Margen", color = Color(0xFFEA580C), style = MaterialTheme.typography.labelMedium)
-                    Text("Promedio", color = Color(0xFFEA580C), style = MaterialTheme.typography.labelSmall)
-                    Text("%.4f".format(avgMargin), fontWeight = FontWeight.Bold, color = Color(0xFFEA580C))
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
+        // Botón principal de la parte inferior para mostrar operaciones
         Button(
             onClick = { showOperations = !showOperations },
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+            shape = RoundedCornerShape(8.dp)
         ) {
             Text(if (showOperations) "Ocultar Operaciones" else "Mostrar Operaciones")
         }
 
         if (showOperations) {
             Spacer(modifier = Modifier.height(16.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            
+            // Libro de órdenes simplificado
+            Row(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Órdenes de compra", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Text("500 $quote a 3.7200 $base", fontSize = 12.sp)
+                    Text("500 $quote a 3.72 $base", fontSize = 12.sp, color = Color.Gray)
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Ofertas de venta", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Text("Sin ofertas", fontSize = 12.sp, color = Color.Gray)
+                    if (localSellOffers.isEmpty()) {
+                        Text("Sin ofertas", fontSize = 12.sp, color = Color.Gray)
+                    } else {
+                        localSellOffers.forEach { offer ->
+                            Text(offer, fontSize = 12.sp, color = Color.DarkGray)
+                        }
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
+            // Los 4 botones de operaciones
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { /* TODO */ }, modifier = Modifier.weight(1f)) {
-                    Text("Orden Compra", fontSize = 12.sp)
+                Button(onClick = { /* TODO */ }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp)) {
+                    Text("Orden Compra", fontSize = 11.sp)
                 }
-                Button(onClick = { /* TODO */ }, modifier = Modifier.weight(1f)) {
-                    Text("Oferta Venta", fontSize = 12.sp)
+                // BOTÓN OBJETIVO: Generar Oferta de Venta
+                Button(
+                    onClick = { showSellOfferDialog = true }, 
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Generar Oferta de Venta", fontSize = 11.sp)
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -154,18 +159,127 @@ fun PairDetailScreen(navController: NavController, code: String) {
                 Button(
                     onClick = { navController.navigate("instantBuy") },
                     modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1C2E))
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1C2E)),
+                    shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text("Compra Inst.", fontSize = 12.sp)
+                    Text("Compra Inst.", fontSize = 11.sp)
                 }
                 Button(
                     onClick = { navController.navigate("ventaInmediata/$code") },
                     modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1C2E))
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1C2E)),
+                    shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text("Venta Inst.", fontSize = 12.sp)
+                    Text("Venta Inst.", fontSize = 11.sp)
                 }
             }
         }
+        
+        Spacer(modifier = Modifier.height(40.dp))
     }
+}
+
+@Composable
+fun SellOfferDialog(
+    baseCurrency: String,
+    quoteCurrency: String,
+    currentMinSell: Double,
+    availableBalance: Double,
+    onDismiss: () -> Unit,
+    onConfirm: (amount: Double, price: Double) -> Unit
+) {
+    var amountText by remember { mutableStateOf("") }
+    var priceText by remember { mutableStateOf("%.4f".format(currentMinSell)) }
+
+    val amount = amountText.replace(",", ".").toDoubleOrNull() ?: 0.0
+    val price = priceText.replace(",", ".").toDoubleOrNull() ?: 0.0
+    val total = amount * price
+
+    val isAmountValid = amount > 0
+    val isPriceValid = price > 0
+    val hasBalance = amount <= availableBalance
+    val hasLiquidity = amount < 500000 // Simulación de límite de liquidez
+
+    val canConfirm = isAmountValid && isPriceValid && hasBalance && hasLiquidity
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { 
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Generar Oferta de Venta", style = MaterialTheme.typography.titleLarge)
+                IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Cerrar")
+                }
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Campo Cantidad
+                Column {
+                    Text("Cantidad de $baseCurrency", style = MaterialTheme.typography.labelMedium)
+                    OutlinedTextField(
+                        value = amountText,
+                        onValueChange = { amountText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        placeholder = { Text("0.00") },
+                        isError = (amountText.isNotBlank() && !isAmountValid) || (isAmountValid && !hasBalance)
+                    )
+                    if (amountText.isNotBlank() && !isAmountValid) {
+                        Text("Valor inválido", color = Color.Red, style = MaterialTheme.typography.bodySmall)
+                    } else if (isAmountValid && !hasBalance) {
+                        Text("Saldo insuficiente", color = Color.Red, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+
+                // Campo Precio
+                Column {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Precio Unitario ($quoteCurrency)", style = MaterialTheme.typography.labelMedium)
+                        Text("Actual: %.4f".format(currentMinSell), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    }
+                    OutlinedTextField(
+                        value = priceText,
+                        onValueChange = { priceText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        isError = priceText.isNotBlank() && !isPriceValid
+                    )
+                    if (priceText.isNotBlank() && !isPriceValid) {
+                        Text("Valor inválido", color = Color.Red, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+
+                // Resumen (Estilo de la imagen)
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F3F5)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("Total: %.4f $quoteCurrency".format(total), fontWeight = FontWeight.Bold)
+                        Text("Saldo disponible: %.4f $baseCurrency".format(availableBalance), fontSize = 12.sp, color = Color.Gray)
+                        
+                        if (isAmountValid && !hasLiquidity) {
+                            Text("Liquidez insuficiente", color = Color.Red, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(amount, price) },
+                enabled = canConfirm,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (canConfirm) Color(0xFF1A1C2E) else Color(0xFF8E8E93),
+                    contentColor = Color.White
+                )
+            ) {
+                Text("Confirmar")
+            }
+        }
+    )
 }
