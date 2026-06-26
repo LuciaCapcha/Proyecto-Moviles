@@ -188,4 +188,23 @@ interface SupabaseService {
     suspend fun insertNotificacionCorreo(
         @Body body: Map<String, @JvmSuppressWildcards Any?>
     ): List<NotificacionDto>
+
+    @GET("historicopreciospar")
+    suspend fun getHistoricoByPar(
+        @Query("parmonedaid") parMonedaId: String,
+        @Query("order") order: String = "fecharegistro.desc",
+        @Query("limit") limit: Int = 50
+    ): List<HistoricoPrecioParDto>
+
+    @GET("paresmoneda")
+    suspend fun getAllParesMoneda(
+        @Query("activo") activo: String = "eq.true"
+    ): List<ParMonedaDto>
+
+    @GET("ejecucionesorden")
+    suspend fun getEjecucionesByPar(
+        @Query("parmonedaid") parMonedaId: String,
+        @Query("order") order: String = "fechaejecucion.desc",
+        @Query("limit") limit: Int = 10
+    ): List<EjecucionOrdenDto>
 }
