@@ -157,7 +157,7 @@ fun PairDetailScreen(navController: NavController, code: String) {
             Spacer(modifier = Modifier.height(8.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
-                    onClick = { navController.navigate("instantBuy") },
+                    onClick = { navController.navigate("instantBuy/$code") },
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1C2E)),
                     shape = RoundedCornerShape(8.dp)
