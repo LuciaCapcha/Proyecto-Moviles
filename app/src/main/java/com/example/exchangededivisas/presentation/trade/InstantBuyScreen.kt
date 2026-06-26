@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -26,85 +25,64 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-
-data class SellOffer(
-    val seller: String,
-    val amountAvailable: Double,
-    val unitPrice: Double
-)
-
-data class InstantBuyCalculation(
-    val requestedAmount: Double,
-    val coveredAmount: Double,
-    val total: Double,
-    val prices: List<Double>
-)
-
-private val mockSellOffers = listOf(
-    SellOffer("vendedor_01", 300.0, 3.72),
-    SellOffer("vendedor_02", 250.0, 3.72),
-    SellOffer("vendedor_03", 400.0, 3.75),
-    SellOffer("vendedor_04", 600.0, 3.78),
-    SellOffer("vendedor_05", 350.0, 3.80)
-).sortedBy { it.unitPrice }
-
-private fun calculateInstantBuy(amount: Double): InstantBuyCalculation {
-    var remaining = amount
-    var covered = 0.0
-    var total = 0.0
-    val usedPrices = mutableListOf<Double>()
-
-    for (offer in mockSellOffers) {
-        if (remaining <= 0.0) break
-
-        val taken = minOf(remaining, offer.amountAvailable)
-        covered += taken
-        total += taken * offer.unitPrice
-        usedPrices.add(offer.unitPrice)
-        remaining -= taken
-    }
-
-    return InstantBuyCalculation(
-        requestedAmount = amount,
-        coveredAmount = covered,
-        total = total,
-        prices = usedPrices
-    )
-}
+import com.example.exchangededivisas.data.repository.ExchangeRepository
+import com.example.exchangededivisas.data.repository.InstantBuyPreview
+import com.example.exchangededivisas.data.session.AppSession
+import kotlinx.coroutines.launch
 
 @Composable
-fun InstantBuyScreen() {
-    var amountText by remember { mutableStateOf("") }
-    var showDialog by remember { mutableStateOf(false) }
+fun InstantBuyScreen(code: String = "PEN_USD") {
+    val scope = rememberCoroutineScope()
+    val currentUser by AppSession.currentUser.collectAsState()
 
-    val userPenBalance = 2800.00
-    val fromCurrency = "PEN"
-    val toCurrency = "USD"
+    var amountText by remember { mutableStateOf("") }
+    var preview by remember { mutableStateOf<InstantBuyPreview?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var isLoadingPreview by remember { mutableStateOf(false) }
+    var isExecuting by remember { mutableStateOf(false) }
+    var dialogMessage by remember { mutableStateOf<String?>(null) }
 
     val amount = amountText.toDoubleOrNull() ?: 0.0
-    val calculation = calculateInstantBuy(amount)
-
     val isValueInvalid = amountText.isNotBlank() && amount <= 0.0
-    val hasLiquidity = amount > 0.0 && calculation.coveredAmount >= amount
-    val hasEnoughBalance = userPenBalance >= calculation.total
 
-    val canConfirm = amount > 0.0 && hasLiquidity && hasEnoughBalance
+    LaunchedEffect(code, amountText, currentUser.usuarioId) {
+        preview = null
+        error = null
 
-    val minPrice = calculation.prices.minOrNull() ?: 0.0
-    val maxPrice = calculation.prices.maxOrNull() ?: 0.0
-    val avgPrice = if (calculation.coveredAmount > 0.0) {
-        calculation.total / calculation.coveredAmount
-    } else {
-        0.0
+        if (amount <= 0.0) return@LaunchedEffect
+
+        isLoadingPreview = true
+
+        ExchangeRepository.previewInstantBuy(
+            usuarioId = currentUser.usuarioId,
+            pairCode = code,
+            amount = amount
+        ).onSuccess {
+            preview = it
+        }.onFailure {
+            error = it.message ?: "No se pudo calcular la compra inmediata."
+        }
+
+        isLoadingPreview = false
     }
+
+    val p = preview
+    val canConfirm = p != null &&
+            amount > 0.0 &&
+            p.hasLiquidity &&
+            p.hasEnoughBalance &&
+            !isExecuting
 
     Column(
         modifier = Modifier
@@ -119,38 +97,33 @@ fun InstantBuyScreen() {
         )
 
         Text(
-            text = "Compra $toCurrency usando $fromCurrency contra las mejores ofertas de venta disponibles.",
+            text = "Compra contra las mejores ofertas de venta disponibles en Supabase.",
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+            elevation = CardDefaults.cardElevation(3.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
+                Text("Par seleccionado", fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Par seleccionado",
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "$fromCurrency → $toCurrency",
+                    text = code.replace("_", " → ").replace("/", " → "),
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "Saldo disponible: %.2f %s".format(userPenBalance, fromCurrency),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (p != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Saldo disponible: %.2f %s".format(p.availableBalance, p.fromCurrency),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
 
@@ -159,7 +132,7 @@ fun InstantBuyScreen() {
         OutlinedTextField(
             value = amountText,
             onValueChange = { amountText = it },
-            label = { Text("Cantidad que desea comprar en $toCurrency") },
+            label = { Text("Cantidad que desea comprar") },
             leadingIcon = { Icon(Icons.Default.ShoppingCart, contentDescription = null) },
             singleLine = true,
             isError = isValueInvalid,
@@ -174,8 +147,7 @@ fun InstantBuyScreen() {
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+            elevation = CardDefaults.cardElevation(3.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
@@ -186,30 +158,42 @@ fun InstantBuyScreen() {
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                SummaryRow("Cantidad solicitada", "%.2f %s".format(amount, toCurrency))
-                SummaryRow("Cantidad cubierta", "%.2f %s".format(calculation.coveredAmount, toCurrency))
-                SummaryRow("Total a pagar", "%.2f %s".format(calculation.total, fromCurrency))
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
-
                 if (amount <= 0.0) {
                     Text(
-                        text = "Ingresa una cantidad para calcular el precio.",
+                        text = "Ingresa una cantidad positiva para calcular el total.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                } else if (calculation.prices.isNotEmpty() && minPrice == maxPrice) {
-                    SummaryRow("Precio unitario", "%.2f %s".format(minPrice, fromCurrency))
-                } else if (calculation.prices.isNotEmpty()) {
-                    SummaryRow("Precio mínimo", "%.2f %s".format(minPrice, fromCurrency))
-                    SummaryRow("Precio máximo", "%.2f %s".format(maxPrice, fromCurrency))
-                    SummaryRow("Precio promedio", "%.2f %s".format(avgPrice, fromCurrency))
+                } else if (isLoadingPreview) {
+                    Text("Calculando mejores ofertas...")
+                } else if (p != null) {
+                    SummaryRow("Cantidad solicitada", "%.2f %s".format(p.requestedAmount, p.toCurrency))
+                    SummaryRow("Cantidad cubierta", "%.2f %s".format(p.coveredAmount, p.toCurrency))
+                    SummaryRow("Total a pagar", "%.2f %s".format(p.totalToPay, p.fromCurrency))
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
+
+                    if (p.minPrice == p.maxPrice) {
+                        SummaryRow("Precio unitario", "%.4f %s".format(p.minPrice, p.fromCurrency))
+                    } else {
+                        SummaryRow("Precio mínimo", "%.4f %s".format(p.minPrice, p.fromCurrency))
+                        SummaryRow("Precio máximo", "%.4f %s".format(p.maxPrice, p.fromCurrency))
+                        SummaryRow("Precio promedio", "%.4f %s".format(p.avgPrice, p.fromCurrency))
+                    }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        if (amount > 0.0 && !hasLiquidity) {
+        if (error != null) {
+            Text(
+                text = error!!,
+                color = MaterialTheme.colorScheme.error,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        if (p != null && amount > 0.0 && !p.hasLiquidity) {
             Text(
                 text = "Liquidez insuficiente",
                 color = MaterialTheme.colorScheme.error,
@@ -217,7 +201,7 @@ fun InstantBuyScreen() {
             )
         }
 
-        if (amount > 0.0 && hasLiquidity && !hasEnoughBalance) {
+        if (p != null && amount > 0.0 && p.hasLiquidity && !p.hasEnoughBalance) {
             Text(
                 text = "Saldo insuficiente",
                 color = MaterialTheme.colorScheme.error,
@@ -228,7 +212,32 @@ fun InstantBuyScreen() {
         Spacer(modifier = Modifier.height(20.dp))
 
         Button(
-            onClick = { showDialog = true },
+            onClick = {
+                scope.launch {
+                    isExecuting = true
+                    error = null
+
+                    ExchangeRepository.executeInstantBuy(
+                        usuarioId = currentUser.usuarioId,
+                        pairCode = code,
+                        amount = amount
+                    ).onSuccess { receipt ->
+                        dialogMessage = "Compra confirmada. Compraste %.2f %s por %.2f %s."
+                            .format(
+                                receipt.boughtAmount,
+                                receipt.toCurrency,
+                                receipt.paidTotal,
+                                receipt.fromCurrency
+                            )
+                        amountText = ""
+                        preview = null
+                    }.onFailure {
+                        error = it.message ?: "No se pudo ejecutar la compra inmediata."
+                    }
+
+                    isExecuting = false
+                }
+            },
             enabled = canConfirm,
             modifier = Modifier
                 .fillMaxWidth()
@@ -236,24 +245,19 @@ fun InstantBuyScreen() {
         ) {
             Icon(Icons.Default.CheckCircle, contentDescription = null)
             Text(
-                text = "Confirmar compra",
+                text = if (isExecuting) "Ejecutando..." else "Confirmar compra",
                 modifier = Modifier.padding(start = 8.dp)
             )
         }
     }
 
-    if (showDialog) {
+    if (dialogMessage != null) {
         AlertDialog(
-            onDismissRequest = { showDialog = false },
-            title = { Text("Compra confirmada") },
-            text = {
-                Text(
-                    "Se compraron %.2f %s por un total de %.2f %s. La billetera fue actualizada y el vendedor recibirá una notificación por correo."
-                        .format(amount, toCurrency, calculation.total, fromCurrency)
-                )
-            },
+            onDismissRequest = { dialogMessage = null },
+            title = { Text("Compra inmediata") },
+            text = { Text(dialogMessage!!) },
             confirmButton = {
-                TextButton(onClick = { showDialog = false }) {
+                TextButton(onClick = { dialogMessage = null }) {
                     Text("Aceptar")
                 }
             }
@@ -269,14 +273,7 @@ private fun SummaryRow(label: String, value: String) {
             .padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(
-            text = label,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        Text(
-            text = value,
-            fontWeight = FontWeight.Medium
-        )
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, fontWeight = FontWeight.Medium)
     }
 }
