@@ -141,3 +141,22 @@ data class MovimientoDto(
 data class NotificacionDto(
     @SerializedName("notificacionid") val notificacionId: Int?
 )
+
+data class HistoricoPrecioParDto(
+    @SerializedName("historicoprecioid") val historicoPrecioId: Int,
+    @SerializedName("parmonedaid") val parMonedaId: Int,
+    @SerializedName("mayorpreciocompra") val mayorPrecioCompra: Double?,
+    @SerializedName("menorprecioventa") val menorPrecioVenta: Double?,
+    @SerializedName("volumencompra") val volumenCompra: Double,
+    @SerializedName("volumenventa") val volumenVenta: Double,
+    @SerializedName("fecharegistro") val fechaRegistro: String?
+)
+
+data class EjecucionOrdenDto(
+    @SerializedName("ejecucionid") val ejecucionId: Int,
+    @SerializedName("parmonedaid") val parMonedaId: Int,
+    @SerializedName("cantidadejecutada") val cantidadEjecutada: Double,
+    @SerializedName("preciounitario") val precioUnitario: Double,
+    @SerializedName("totaloperacion") val totalOperacion: Double,
+    @SerializedName("fechaejecucion") val fechaEjecucion: String?
+)

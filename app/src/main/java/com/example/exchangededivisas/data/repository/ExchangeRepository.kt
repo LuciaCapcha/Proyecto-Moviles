@@ -827,4 +827,77 @@ object ExchangeRepository {
         if (value.isNullOrBlank()) return "-"
         return value.take(16).replace("T", " ")
     }
+
+    suspend fun loadHomeData(usuarioId: Int): HomeData {
+        // 1. Obtener todos los pares activos
+        val pares = api.getAllParesMoneda()
+
+        // 2. Para cada par, sumar volumen total del histórico
+        data class ParVolumen(val parMonedaId: Int, val volumenTotal: Double)
+
+        val volumenes = pares.map { par ->
+            val historico = api.getHistoricoByPar("eq.${par.parMonedaId}", limit = 100)
+            val volTotal = historico.sumOf { it.volumenCompra + it.volumenVenta }
+            ParVolumen(par.parMonedaId, volTotal)
+        }.sortedByDescending { it.volumenTotal }
+
+        // 3. Par más activo global
+        val globalParId = volumenes.firstOrNull()?.parMonedaId
+        val globalChartData = if (globalParId != null) {
+            buildChartData(globalParId)
+        } else null
+
+        // 4. Par más operado por el usuario
+        val userOrders = api.getOrdenesCompraByUser("eq.$usuarioId")
+        val userOffers = api.getOfertasVentaByUser("eq.$usuarioId")
+
+        val userParCounts = mutableMapOf<Int, Int>()
+        userOrders.forEach { userParCounts[it.parMonedaId] = (userParCounts[it.parMonedaId] ?: 0) + 1 }
+        userOffers.forEach { userParCounts[it.parMonedaId] = (userParCounts[it.parMonedaId] ?: 0) + 1 }
+
+        val userTopParId = userParCounts.maxByOrNull { it.value }?.key
+        val userChartData = if (userTopParId != null) {
+            buildChartData(userTopParId)
+        } else globalChartData // fallback al global si no tiene operaciones
+
+        return HomeData(
+            globalMostActive = globalChartData,
+            userMostActive = userChartData,
+            hasUserActivity = userTopParId != null
+        )
+    }
+
+    private suspend fun buildChartData(parMonedaId: Int): com.example.exchangededivisas.data.model.CurrencyPairChartData {
+        val par = api.getParMonedaById("eq.$parMonedaId").firstOrNull()
+            ?: return com.example.exchangededivisas.data.model.CurrencyPairChartData("?", "?", emptyList())
+
+        val fromCode = api.getMonedaById("eq.${par.monedaOrigenId}")
+            .firstOrNull()?.codigoIso?.trim() ?: "?"
+        val toCode = api.getMonedaById("eq.${par.monedaDestinoId}")
+            .firstOrNull()?.codigoIso?.trim() ?: "?"
+
+        val historico = api.getHistoricoByPar(
+            parMonedaId = "eq.$parMonedaId",
+            order = "fecharegistro.asc",
+            limit = 50
+        )
+
+        val prices = historico.mapNotNull { h ->
+            val buy = h.mayorPrecioCompra ?: return@mapNotNull null
+            val sell = h.menorPrecioVenta ?: return@mapNotNull null
+            val fecha = h.fechaRegistro ?: return@mapNotNull null
+            try {
+                val dt = java.time.OffsetDateTime.parse(fecha).toLocalDateTime()
+                com.example.exchangededivisas.data.model.HistoricalPrice(dt, buy, sell)
+            } catch (e: Exception) { null }
+        }
+
+        return com.example.exchangededivisas.data.model.CurrencyPairChartData(fromCode, toCode, prices)
+    }
+
+    data class HomeData(
+        val globalMostActive: com.example.exchangededivisas.data.model.CurrencyPairChartData?,
+        val userMostActive: com.example.exchangededivisas.data.model.CurrencyPairChartData?,
+        val hasUserActivity: Boolean
+    )
 }
