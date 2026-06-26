@@ -160,3 +160,15 @@ data class EjecucionOrdenDto(
     @SerializedName("totaloperacion") val totalOperacion: Double,
     @SerializedName("fechaejecucion") val fechaEjecucion: String?
 )
+
+data class HistorialTransaccionDto(
+    @SerializedName("historialid") val historialId: Int,
+    @SerializedName("usuarioid") val usuarioId: Int,
+    @SerializedName("tipooperacion") val tipoOperacion: String,
+    @SerializedName("referenciaid") val referenciaId: Int,
+    @SerializedName("parmonedaid") val parMonedaId: Int?,
+    @SerializedName("monedaid") val monedaId: Int?,
+    @SerializedName("fechahora") val fechaHora: String?,
+    @SerializedName("estado") val estado: String,
+    @SerializedName("metodoejecucion") val metodoEjecucion: String?
+)

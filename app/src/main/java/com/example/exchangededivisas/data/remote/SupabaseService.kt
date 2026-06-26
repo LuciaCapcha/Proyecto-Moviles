@@ -207,4 +207,60 @@ interface SupabaseService {
         @Query("order") order: String = "fechaejecucion.desc",
         @Query("limit") limit: Int = 10
     ): List<EjecucionOrdenDto>
+
+    @GET("usuarios")
+    suspend fun getAllUsuarios(
+        @Query("order") order: String = "fecharegistro.desc"
+    ): List<UsuarioDto>
+
+    @GET("usuarios")
+    suspend fun getUsuariosByEstado(
+        @Query("estado") estado: String,
+        @Query("order") order: String = "fecharegistro.desc"
+    ): List<UsuarioDto>
+
+    @PATCH("usuarios")
+    @Headers("Prefer: return=representation")
+    suspend fun updateUsuarioEstado(
+        @Query("usuarioid") usuarioId: String,
+        @Body body: Map<String, @JvmSuppressWildcards Any?>
+    ): List<UsuarioDto>
+
+    @GET("historialtransacciones")
+    suspend fun getHistorialByUsuario(
+        @Query("usuarioid") usuarioId: String,
+        @Query("order") order: String = "fechahora.desc",
+        @Query("limit") limit: Int = 20
+    ): List<HistorialTransaccionDto>
+
+    @POST("restriccionesusuario")
+    @Headers("Prefer: return=representation")
+    suspend fun insertRestriccion(
+        @Body body: Map<String, @JvmSuppressWildcards Any?>
+    ): List<Map<String, Any?>>
+
+    @POST("auditoriaadministrativa")
+    @Headers("Prefer: return=representation")
+    suspend fun insertAuditoria(
+        @Body body: Map<String, @JvmSuppressWildcards Any?>
+    ): List<Map<String, Any?>>
+
+    @GET("ordenescompra")
+    suspend fun countOrdenesActivas(
+        @Query("estado") estado: String = "in.(Activa,Parcialmente ejecutada)",
+        @Query("select") select: String = "ordencompraid"
+    ): List<Map<String, Any?>>
+
+    @GET("ofertasventa")
+    suspend fun countOfertasActivas(
+        @Query("estado") estado: String = "in.(Activa,Parcialmente ejecutada)",
+        @Query("select") select: String = "ofertaventaid"
+    ): List<Map<String, Any?>>
+
+    @GET("ejecucionesorden")
+    suspend fun getEjecucionesHoy(
+        @Query("fechaejecucion") fecha: String,
+        @Query("select") select: String = "ejecucionid,totaloperacion"
+    ): List<Map<String, Any?>>
+
 }
