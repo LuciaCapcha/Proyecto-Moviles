@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">ExchangedeDivisas</string>
+    <string name="order_book_title">Libro de Órdenes</string>
+    <string name="currency_pair_label">USD/PEN</string>
+    <string name="sell_offers_title">Ofertas de Venta</string>
+    <string name="buy_orders_title">Órdenes de Compra</string>
+    <string name="no_sell_offers">Sin ofertas disponibles</string>
+    <string name="no_buy_orders">Sin órdenes disponibles</string>
+    <string name="qty_label">Qty:</string>
+    <string name="price_label">S/.</string>
 </resources>

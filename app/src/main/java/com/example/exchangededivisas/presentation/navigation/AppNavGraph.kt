@@ -1,4 +1,6 @@
 package com.example.exchangededivisas.presentation.navigation
+import com.example.exchangededivisas.presentation.orderbook.OrderBookScreen
+import com.example.exchangededivisas.presentation.trade.CreateOrderScreen
 
 import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
@@ -36,51 +38,16 @@ fun AppNavGraph() {
             AdminDashboardScreen(navController = navController, userRole = "ADM")
         }
 
-        composable("home") {
-            MainScaffold(navController) { HomeScreen() }
-        }
-
-        composable("wallet") {
-            MainScaffold(navController) { WalletScreen(navController) }
-        }
-
-        composable("currencies") {
-            MainScaffold(navController) { PairsScreen(navController) }
-        }
-
-        composable("pairs") {
-            MainScaffold(navController) { PairsScreen(navController) }
-        }
-
-        composable("transactions") {
-            MainScaffold(navController) { TransactionsScreen() }
-        }
-
-        composable("history") {
-            MainScaffold(navController) { HistoryScreen() }
-        }
-
-        composable("settings") {
-            MainScaffold(navController) { SettingsScreen() }
-        }
-
-        composable("deposit") {
-            MainScaffold(navController) { DepositScreen() }
-        }
-
-        composable("withdraw") {
-            MainScaffold(navController) { WithdrawScreen(navController) }
-        }
-
-        composable("instantBuy") {
-            MainScaffold(navController) { InstantBuyScreen("PEN_USD") }
-        }
-
-        composable("instantBuy/{code}") { backStackEntry ->
-            val code = backStackEntry.arguments?.getString("code") ?: "PEN_USD"
-            MainScaffold(navController) { InstantBuyScreen(code) }
-        }
-
+        // --- Pantallas CON barra de navegación (las 7 opciones del usuario común) ---
+        composable("home") { MainScaffold(navController) { HomeScreen(navController) } } //  ¡Así debe quedar!
+        composable("wallet") { MainScaffold(navController) { WalletScreen(navController) } }
+        composable("currencies") { MainScaffold(navController) { PairsScreen(navController) } }
+        composable("transactions") { MainScaffold(navController) { TransactionsScreen() } }
+        composable("history") { MainScaffold(navController) { HistoryScreen() } }
+        composable("settings") { MainScaffold(navController) { SettingsScreen() } }
+        composable("deposit") { MainScaffold(navController) { DepositScreen() } }
+        composable("withdraw") { MainScaffold(navController) { WithdrawScreen(navController) } }
+        composable("instantBuy") { MainScaffold(navController) { InstantBuyScreen() } }
         composable("ventaInmediata/{code}") { backStackEntry ->
             val code = backStackEntry.arguments?.getString("code") ?: "USD_PEN"
             MainScaffold(navController) { InstantSaleScreen(navController, code) }
@@ -89,6 +56,21 @@ fun AppNavGraph() {
         composable("pairDetail/{code}") { backStackEntry ->
             val code = backStackEntry.arguments?.getString("code") ?: "PEN_USD"
             MainScaffold(navController) { PairDetailScreen(navController, code) }
+            // Libro de órdenes con par fijo
+            composable("orderbook") {
+                MainScaffold(navController) { OrderBookScreen(currencyPair = "USD/PEN") }
+            }
+
+            // Libro de órdenes con par dinámico (viene de otra pantalla)
+            composable("orderbook/{currencyPair}") { backStackEntry ->
+                val pair = backStackEntry.arguments?.getString("currencyPair") ?: "USD_PEN"
+                MainScaffold(navController) {
+                    OrderBookScreen(currencyPair = pair.replace("_", "/"))
+                }
+            }
+        }
+        composable("orderbook") {
+            MainScaffold(navController) { OrderBookScreen() }
         }
     }
 }

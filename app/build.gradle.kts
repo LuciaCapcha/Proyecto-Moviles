@@ -54,6 +54,11 @@ dependencies {
 
     // Charts
     implementation(libs.mpandroidchart)
+    // Coroutines para Android
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+
+// ViewModel para Compose
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
 
     // Navegación entre pantallas e imágenes
     implementation("androidx.navigation:navigation-compose:2.8.9")
@@ -72,7 +77,10 @@ dependencies {
     implementation("com.squareup.okhttp3:logging-interceptor:4.9.3")
 
     // Fragment
-    implementation("androidx.fragment:fragment-ktx:1.6.2")
+    implementation("androidx.fragment:fragment-ktx:1.5.7")
+    implementation("com.jakewharton.retrofit:retrofit2-kotlin-coroutines-adapter:0.9.2")
+// O si usas retrofit 2.9+, ya viene incluido con:
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
