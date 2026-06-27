@@ -16,7 +16,8 @@ sealed class HomeUiState {
         val globalMostActive: CurrencyPairChartData?,
         val userMostActive: CurrencyPairChartData?,
         val isLoggedIn: Boolean,
-        val userName: String
+        val userName: String,
+        val isLoadingCharts: Boolean = false
     ) : HomeUiState()
     data class Error(val message: String) : HomeUiState()
 }
@@ -40,19 +41,29 @@ class HomeViewModel : ViewModel() {
 
     fun loadDashboardData() {
         viewModelScope.launch {
-            _uiState.value = HomeUiState.Loading
-            try {
-                val currentUser = AppSession.currentUser.value
-                val isLoggedIn = currentUser.usuarioId != 0
-                        && currentUser.estado == "Activo"
+            val currentUser = AppSession.currentUser.value
+            val isLoggedIn = currentUser.usuarioId != 0 && currentUser.estado == "Activo"
 
+            // Emitir un estado de éxito parcial inmediatamente para mostrar el saludo
+            if (_uiState.value !is HomeUiState.Success) {
+                _uiState.value = HomeUiState.Success(
+                    globalMostActive = null,
+                    userMostActive = null,
+                    isLoggedIn = isLoggedIn,
+                    userName = currentUser.nombreUsuario,
+                    isLoadingCharts = true
+                )
+            }
+
+            try {
                 val homeData = ExchangeRepository.loadHomeData(currentUser.usuarioId)
 
                 _uiState.value = HomeUiState.Success(
                     globalMostActive = homeData.globalMostActive,
                     userMostActive = homeData.userMostActive,
                     isLoggedIn = isLoggedIn,
-                    userName = currentUser.nombreUsuario
+                    userName = currentUser.nombreUsuario,
+                    isLoadingCharts = false
                 )
             } catch (e: Exception) {
                 _uiState.value = HomeUiState.Error(

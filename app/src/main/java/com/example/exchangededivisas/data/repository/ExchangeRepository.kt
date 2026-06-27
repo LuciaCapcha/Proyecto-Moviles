@@ -10,7 +10,6 @@ import com.example.exchangededivisas.data.remote.ParMonedaDto
 import com.example.exchangededivisas.data.remote.SaldoBilleteraDto
 import com.example.exchangededivisas.data.session.AppSession
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import java.time.OffsetDateTime
 import java.time.ZonedDateTime
@@ -86,6 +85,17 @@ private data class PlannedOfferExecution(
 object ExchangeRepository {
 
     private val api = ApiClient.supabase
+    
+    private var cachedMonedas: Map<Int, MonedaDto>? = null
+    private var cachedPares: List<ParMonedaDto>? = null
+
+    private suspend fun getMonedasCached(): Map<Int, MonedaDto> {
+        return cachedMonedas ?: api.getMonedas().associateBy { it.monedaId }.also { cachedMonedas = it }
+    }
+
+    private suspend fun getParesCached(): List<ParMonedaDto> {
+        return cachedPares ?: api.getAllParesMoneda().also { cachedPares = it }
+    }
 
     suspend fun obtenerHistoricoGrafico(parId: Int, rangoTiempo: String): List<HistoricoPrecioParDto> {
         val now = ZonedDateTime.now()
@@ -102,10 +112,8 @@ object ExchangeRepository {
 
         val fechaFiltro = startDateTime?.let { "gte.${it.format(formatter)}" }
 
-        return ApiClient.supabaseApi.getHistoricoPrecios(
-            apiKey = ApiClient.SUPABASE_KEY,
-            token = "Bearer ${ApiClient.SUPABASE_KEY}",
-            parId = "eq.$parId",
+        return api.getHistoricoByPar(
+            parMonedaId = "eq.$parId",
             fechaGte = fechaFiltro
         )
     }
@@ -157,23 +165,27 @@ object ExchangeRepository {
     }
 
     suspend fun loadWallet(usuarioId: Int): List<WalletCurrencyUi> {
-        val wallet = getOrCreateWallet(usuarioId)
+        return try {
+            val wallet = getOrCreateWallet(usuarioId)
 
-        val currencies = api.getMonedas()
-        val balances = api.getSaldosByWallet("eq.${wallet.billeteraId}")
-            .associateBy { it.monedaId }
+            val currencies = api.getMonedas()
+            val balances = api.getSaldosByWallet("eq.${wallet.billeteraId}")
+                .associateBy { it.monedaId }
 
-        return currencies.map { currency ->
-            val balance = balances[currency.monedaId]?.saldoDisponible ?: 0.0
+            currencies.map { currency ->
+                val balance = balances[currency.monedaId]?.saldoDisponible ?: 0.0
 
-            WalletCurrencyUi(
-                monedaId = currency.monedaId,
-                code = currency.codigoIso.trim(),
-                name = currency.nombre,
-                balance = balance,
-                isInternational = currency.tipo?.contains("Internacional", ignoreCase = true) == true
-            )
-        }.sortedByDescending { it.balance }
+                WalletCurrencyUi(
+                    monedaId = currency.monedaId,
+                    code = currency.codigoIso.trim(),
+                    name = currency.nombre,
+                    balance = balance,
+                    isInternational = currency.tipo?.contains("Internacional", ignoreCase = true) == true
+                )
+            }.sortedByDescending { it.balance }
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 
     suspend fun makeDeposit(
@@ -682,12 +694,9 @@ object ExchangeRepository {
 
     private suspend fun getCurrencyByCode(code: String): MonedaDto {
         val cleaned = cleanCode(code)
-
-        return api.getMonedaByCode("eq.$cleaned").firstOrNull()
-            ?: api.getMonedas().firstOrNull {
-                it.codigoIso.trim().equals(cleaned, ignoreCase = true)
-            }
-            ?: error("No existe la moneda $cleaned en Supabase.")
+        return getMonedasCached().values.firstOrNull {
+            it.codigoIso.trim().equals(cleaned, ignoreCase = true)
+        } ?: error("No existe la moneda $cleaned en Supabase.")
     }
 
     private suspend fun getPaymentMethodByName(name: String): MetodoPagoDto {
@@ -702,11 +711,9 @@ object ExchangeRepository {
         originCurrencyId: Int,
         destinationCurrencyId: Int
     ): ParMonedaDto {
-        return api.getParMoneda(
-            monedaOrigenId = "eq.$originCurrencyId",
-            monedaDestinoId = "eq.$destinationCurrencyId"
-        ).firstOrNull()
-            ?: error("No existe el par de monedas seleccionado en Supabase.")
+        return getParesCached().firstOrNull {
+            it.monedaOrigenId == originCurrencyId && it.monedaDestinoId == destinationCurrencyId
+        } ?: error("No existe el par de monedas seleccionado en Supabase.")
     }
 
     private suspend fun getAvailableOffers(
@@ -857,73 +864,66 @@ object ExchangeRepository {
     }
 
     suspend fun loadHomeData(usuarioId: Int): HomeData = coroutineScope {
-        // 1. Obtener todos los pares activos
-        val pares = api.getAllParesMoneda()
-
-        // 2. Ejecutar peticiones de volumen en PARALELO
-        data class ParVolumen(val parMonedaId: Int, val volumenTotal: Double)
-
-        val deferredVolumenes = pares.map { par ->
-            async {
-                val historico = try {
-                    api.getHistoricoByPar("eq.${par.parMonedaId}", limit = 100)
-                } catch (e: Exception) { emptyList() }
-                val volTotal = historico.sumOf { it.volumenCompra + it.volumenVenta }
-                ParVolumen(par.parMonedaId, volTotal)
-            }
-        }
-
-        val volumenes = deferredVolumenes.awaitAll().sortedByDescending { it.volumenTotal }
-
-        // 3. Par más activo global
-        val globalParId = volumenes.firstOrNull()?.parMonedaId
-        val globalChartDataDeferred = globalParId?.let { async { buildChartData(it) } }
-
-        // 4. Par más operado por el usuario
+        // 1. Obtener datos base en paralelo
+        val paresDeferred = async { try { api.getAllParesMoneda() } catch(e: Exception) { emptyList() } }
+        val monedasDeferred = async { try { api.getMonedas() } catch(e: Exception) { emptyList() } }
         val userOrdersDeferred = async { try { api.getOrdenesCompraByUser("eq.$usuarioId") } catch(e: Exception) { emptyList() } }
         val userOffersDeferred = async { try { api.getOfertasVentaByUser("eq.$usuarioId") } catch(e: Exception) { emptyList() } }
 
+        val allPairs = paresDeferred.await()
+        val allMonedas = monedasDeferred.await().associateBy { it.monedaId }
         val userOrders = userOrdersDeferred.await()
         val userOffers = userOffersDeferred.await()
 
+        // 2. Determinar par más activo del usuario
         val userParCounts = mutableMapOf<Int, Int>()
         userOrders.forEach { userParCounts[it.parMonedaId] = (userParCounts[it.parMonedaId] ?: 0) + 1 }
         userOffers.forEach { userParCounts[it.parMonedaId] = (userParCounts[it.parMonedaId] ?: 0) + 1 }
-
         val userTopParId = userParCounts.maxByOrNull { it.value }?.key
-        val userChartDataDeferred = userTopParId?.let { async { buildChartData(it) } }
 
-        val globalChartData = globalChartDataDeferred?.await()
-        val userChartData = userChartDataDeferred?.await() ?: globalChartData
+        // 3. Par global destacado (tomamos el primero disponible para evitar N peticiones de volumen)
+        val globalParId = allPairs.firstOrNull()?.parMonedaId
+
+        // 4. Cargar gráficos para global y usuario en paralelo
+        val globalChartDeferred = globalParId?.let { async { buildChartDataOptimized(it, allMonedas) } }
+        val userChartDeferred = if (userTopParId != null && userTopParId != globalParId) {
+            async { buildChartDataOptimized(userTopParId, allMonedas) }
+        } else null
+
+        val globalChart = globalChartDeferred?.await()
+        val userChart = if (userTopParId == globalParId) globalChart else userChartDeferred?.await()
 
         HomeData(
-            globalMostActive = globalChartData,
-            userMostActive = userChartData,
+            globalMostActive = globalChart,
+            userMostActive = userChart ?: globalChart,
             hasUserActivity = userTopParId != null
         )
     }
 
-    private suspend fun buildChartData(parMonedaId: Int): com.example.exchangededivisas.data.model.CurrencyPairChartData {
-        val par = api.getParMonedaById("eq.$parMonedaId").firstOrNull()
+    private suspend fun buildChartDataOptimized(
+        parId: Int,
+        monedasMap: Map<Int, MonedaDto>
+    ): com.example.exchangededivisas.data.model.CurrencyPairChartData {
+        val par = api.getParMonedaById("eq.$parId").firstOrNull()
             ?: return com.example.exchangededivisas.data.model.CurrencyPairChartData("?", "?", emptyList())
 
-        val fromCode = api.getMonedaById("eq.${par.monedaOrigenId}")
-            .firstOrNull()?.codigoIso?.trim() ?: "?"
-        val toCode = api.getMonedaById("eq.${par.monedaDestinoId}")
-            .firstOrNull()?.codigoIso?.trim() ?: "?"
+        val fromCode = monedasMap[par.monedaOrigenId]?.codigoIso?.trim() ?: "?"
+        val toCode = monedasMap[par.monedaDestinoId]?.codigoIso?.trim() ?: "?"
 
-        val historico = api.getHistoricoByPar(
-            parMonedaId = "eq.$parMonedaId",
-            order = "fecharegistro.asc",
-            limit = 50
-        )
+        val historico = try {
+            api.getHistoricoByPar(
+                parMonedaId = "eq.$parId",
+                order = "fecharegistro.asc",
+                limit = 35 // Reducido para carga más rápida
+            )
+        } catch (e: Exception) { emptyList() }
 
         val prices = historico.mapNotNull { h ->
             val buy = h.mayorPrecioCompra ?: return@mapNotNull null
             val sell = h.menorPrecioVenta ?: return@mapNotNull null
             val fecha = h.fechaRegistro ?: return@mapNotNull null
             try {
-                val dt = java.time.OffsetDateTime.parse(fecha).toLocalDateTime()
+                val dt = OffsetDateTime.parse(fecha).toLocalDateTime()
                 com.example.exchangededivisas.data.model.HistoricalPrice(dt, buy, sell)
             } catch (e: Exception) { null }
         }
@@ -952,6 +952,13 @@ object ExchangeRepository {
 
     data class SellOfferUi(
         val ofertaId: Int,
+        val quantity: Double,
+        val price: Double,
+        val total: Double
+    )
+
+    data class BuyOrderUi(
+        val ordenId: Int,
         val quantity: Double,
         val price: Double,
         val total: Double
@@ -1047,7 +1054,9 @@ object ExchangeRepository {
             val from = getCurrencyByCode(fromCode)
             val to   = getCurrencyByCode(toCode)
             val pair = getPairOrThrow(from.monedaId, to.monedaId)
-            buildChartData(pair.parMonedaId)
+
+            val allMonedas = api.getMonedas().associateBy { it.monedaId }
+            buildChartDataOptimized(pair.parMonedaId, allMonedas)
         }
     }
 
@@ -1065,6 +1074,28 @@ object ExchangeRepository {
                 .map {
                     SellOfferUi(
                         ofertaId = it.ofertaVentaId,
+                        quantity = it.cantidadPendiente,
+                        price    = it.precioUnitario,
+                        total    = it.cantidadPendiente * it.precioUnitario
+                    )
+                }
+        }
+    }
+
+    /** Órdenes de compra activas de un par (libro de órdenes) */
+    suspend fun getActiveBuyOrders(pairCode: String): Result<List<BuyOrderUi>> {
+        return runCatching {
+            val (fromCode, toCode) = parsePairCode(pairCode)
+            val from = getCurrencyByCode(fromCode)
+            val to   = getCurrencyByCode(toCode)
+            val pair = getPairOrThrow(from.monedaId, to.monedaId)
+
+            api.getOrdenesCompraByPair("eq.${pair.parMonedaId}")
+                .filter { isActiveStatus(it.estado) }
+                .sortedByDescending { it.precioUnitario }
+                .map {
+                    BuyOrderUi(
+                        ordenId  = it.ordenCompraId,
                         quantity = it.cantidadPendiente,
                         price    = it.precioUnitario,
                         total    = it.cantidadPendiente * it.precioUnitario

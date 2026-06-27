@@ -12,7 +12,7 @@ object ApiClient {
     private const val API_KEY = "sb_publishable_uY-E0r1E9mLAsheVD_SSaw_iTQttwuG"
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BODY
+        level = HttpLoggingInterceptor.Level.HEADERS // Reducido para mejorar rendimiento
     }
 
     private val httpClient = OkHttpClient.Builder()
