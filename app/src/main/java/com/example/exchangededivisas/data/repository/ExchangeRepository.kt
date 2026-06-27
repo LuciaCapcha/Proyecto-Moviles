@@ -122,7 +122,7 @@ object ExchangeRepository {
             PaymentMethodUi(
                 metodoPagoId = it.metodoPagoId,
                 nombre = it.nombre,
-                comisionPorcentaje = it.comisionPorcentaje ?: 0.0,
+                comisionPorcentaje = (it.comisionPorcentaje ?: 0.0) / 100.0,
                 comisionFija = it.comisionFija ?: 0.0
             )
         }
@@ -1259,26 +1259,31 @@ object ExchangeRepository {
 
             items.forEach { item ->
                 val (before, after) = subtractBalance(usuarioId, item.monedaId, item.amount)
-                val deposito = api.insertDeposito(mapOf(
-                    "usuarioid"        to usuarioId,
-                    "monedaid"         to item.monedaId,
-                    "metodopagoid"     to metodoPagoId,
-                    "montodepositado"  to item.amount,
-                    "comisionaplicada" to (item.amount * comisionPorcentaje),
-                    "montoneto"        to (item.amount * (1 - comisionPorcentaje)),
-                    "estado"           to "Completado",
-                    "fechadeposito"    to now,
-                    "fechaactualizacion" to now
+                val comisionItem = item.amount * comisionPorcentaje
+                val retiro = api.insertRetiro(mapOf(
+                    "usuarioid"          to usuarioId,
+                    "monedaid"           to item.monedaId,
+                    "metodopagoid"       to metodoPagoId,
+                    "montoretirado"      to item.amount,
+                    "comisionaplicada"   to comisionItem,
+                    "montofinalrecibido" to (item.amount - comisionItem),
+                    "estado"             to "Completada",
+                    "voucherurl"         to null,
+                    "fecharetiro"        to now
                 )).first()
 
                 insertWalletMovement(usuarioId, item.monedaId, "Retiro", item.amount,
-                    before, after, "depositos", deposito.depositoId, now)
+                    before, after, "retiros", retiro.retiroId, now)
 
                 api.insertHistorial(mapOf(
-                    "usuarioid" to usuarioId, "tipooperacion" to "Retiro",
-                    "referenciaid" to deposito.depositoId, "parmonedaid" to null,
-                    "monedaid" to item.monedaId, "fechahora" to now,
-                    "estado" to "Completado", "metodoejecucion" to "Normal"
+                    "usuarioid"       to usuarioId,
+                    "tipooperacion"   to "Retiro",
+                    "referenciaid"    to retiro.retiroId,
+                    "parmonedaid"     to null,
+                    "monedaid"        to item.monedaId,
+                    "fechahora"       to now,
+                    "estado"          to "Completada",
+                    "metodoejecucion" to "Normal"
                 ))
             }
 

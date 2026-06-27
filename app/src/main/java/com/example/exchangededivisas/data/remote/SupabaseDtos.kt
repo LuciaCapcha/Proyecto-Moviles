@@ -58,7 +58,18 @@ data class DepositoDto(
     @SerializedName("voucherurl") val voucherUrl: String?,
     @SerializedName("fechadeposito") val fechaDeposito: String?
 )
-
+data class RetiroDto(
+    @SerializedName("retiroid") val retiroId: Int,
+    @SerializedName("usuarioid") val usuarioId: Int,
+    @SerializedName("monedaid") val monedaId: Int,
+    @SerializedName("metodopagoid") val metodoPagoId: Int,
+    @SerializedName("montoretirado") val montoRetirado: Double,
+    @SerializedName("comisionaplicada") val comisionAplicada: Double,
+    @SerializedName("montofinalrecibido") val montoFinalRecibido: Double,
+    @SerializedName("estado") val estado: String,
+    @SerializedName("voucherurl") val voucherUrl: String?,
+    @SerializedName("fecharetiro") val fechaRetiro: String?
+)
 data class ParMonedaDto(
     @SerializedName("parmonedaid") val parMonedaId: Int,
     @SerializedName("monedaorigenid") val monedaOrigenId: Int,

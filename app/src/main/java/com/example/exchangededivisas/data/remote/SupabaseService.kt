@@ -113,6 +113,11 @@ interface SupabaseService {
         @Body body: Map<String, @JvmSuppressWildcards Any?>
     ): List<DepositoDto>
 
+    @POST("retiros")
+    @Headers("Prefer: return=representation")
+    suspend fun insertRetiro(
+        @Body body: Map<String, @JvmSuppressWildcards Any?>
+    ): List<RetiroDto>
     @POST("movimientosbilletera")
     @Headers("Prefer: return=representation")
     suspend fun insertMovimiento(
