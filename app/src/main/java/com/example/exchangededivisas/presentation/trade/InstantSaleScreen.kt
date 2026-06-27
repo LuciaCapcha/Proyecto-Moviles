@@ -19,80 +19,57 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.example.exchangededivisas.data.model.MockCurrencyData
+import com.example.exchangededivisas.data.repository.ExchangeRepository
+import com.example.exchangededivisas.data.session.AppSession
+import kotlinx.coroutines.launch
 
 data class BuyOrder(val quantity: Double, val price: Double)
 
 @Composable
-fun InstantSaleScreen(navController: NavController, pairCode: String = "USD/PEN") {
+fun InstantSaleScreen(navController: NavController, pairCode: String = "USD_PEN") {
     val context = LocalContext.current
-    val codes = pairCode.split("/")
-    val baseCurrency = codes.getOrNull(0) ?: "USD"
+    val scope   = rememberCoroutineScope()
+    val user    by AppSession.currentUser.collectAsState()
+
+    // Normalizar código: el navGraph lo pasa con "_", parsePairCode espera "_" o "/"
+    val cleanCode     = pairCode.replace("/", "_")
+    val codes         = cleanCode.split("_")
+    val baseCurrency  = codes.getOrNull(0) ?: "USD"
     val quoteCurrency = codes.getOrNull(1) ?: "PEN"
 
-    // Simulación de mejores órdenes de compra (Ordenadas por precio DESC)
-    val buyOrders = remember {
-        listOf(
-            BuyOrder(10.0, 4.0000),
-            BuyOrder(20.0, 3.9500),
-            BuyOrder(50.0, 3.9000)
-        )
-    }
+    var quantityText    by remember { mutableStateOf("") }
+    var preview         by remember { mutableStateOf<ExchangeRepository.InstantSalePreview?>(null) }
+    var previewLoading  by remember { mutableStateOf(false) }
+    var confirmLoading  by remember { mutableStateOf(false) }
+    var errorMsg        by remember { mutableStateOf<String?>(null) }
 
-    // Saldo del usuario (Moneda a otorgar: baseCurrency)
-    val userBaseBalance = MockCurrencyData.list.find { it.code == baseCurrency }?.balance ?: 0.0
-    // Saldo de la moneda que recibe (para mostrar como en la imagen)
-    val userQuoteBalance = MockCurrencyData.list.find { it.code == quoteCurrency }?.balance ?: 45725.5375
-
-    // Estados
-    var quantityText by remember { mutableStateOf("") }
     val quantity = quantityText.toDoubleOrNull() ?: 0.0
 
-    // Cálculos en tiempo real según criterios
-    var totalQuote = 0.0
-    var remainingToSell = quantity
-    val pricesUsed = mutableListOf<Double>()
-    var liquidityInsufficient = false
-
-    if (quantity > 0) {
-        for (order in buyOrders) {
-            val take = minOf(remainingToSell, order.quantity)
-            totalQuote += take * order.price
-            if (take > 0) pricesUsed.add(order.price)
-            remainingToSell -= take
-            if (remainingToSell <= 0) break
-        }
-        if (remainingToSell > 0) liquidityInsufficient = true
+    // Preview en tiempo real: cada vez que cambia la cantidad consultamos Supabase
+    LaunchedEffect(quantityText) {
+        if (quantity <= 0.0) { preview = null; return@LaunchedEffect }
+        previewLoading = true
+        ExchangeRepository.previewInstantSale(user.usuarioId, cleanCode, quantity)
+            .onSuccess { preview = it; errorMsg = null }
+            .onFailure { preview = null; errorMsg = it.message }
+        previewLoading = false
     }
 
-    val isValidValue = quantity > 0
-    val hasBalance = quantity <= userBaseBalance
-    val hasLiquidity = !liquidityInsufficient && quantity > 0
-    val canConfirm = isValidValue && hasBalance && hasLiquidity
-
-    // Lógica de visualización de precio
-    val priceDisplay = if (pricesUsed.isEmpty()) ""
-    else if (pricesUsed.distinct().size == 1) "%.4f".format(pricesUsed[0])
-    else {
-        val min = pricesUsed.minOrNull() ?: 0.0
-        val max = pricesUsed.maxOrNull() ?: 0.0
-        val avg = totalQuote / quantity
-        "Min: %.4f, Max: %.4f, Avg: %.4f".format(min, max, avg)
-    }
+    val canConfirm = preview?.let { it.hasLiquidity && it.hasEnoughBalance } == true && !confirmLoading
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.5f))
-            .clickable { navController.popBackStack() }, // Cerrar al tocar fuera
+            .clickable { navController.popBackStack() },
         contentAlignment = Alignment.Center
     ) {
         Card(
             modifier = Modifier
                 .fillMaxWidth(0.9f)
-                .clickable(enabled = false) { } // Evitar que el clic en la card cierre
+                .clickable(enabled = false) {}
                 .padding(16.dp),
-            shape = RoundedCornerShape(16.dp),
+            shape  = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White)
         ) {
             Column(
@@ -106,11 +83,9 @@ fun InstantSaleScreen(navController: NavController, pairCode: String = "USD/PEN"
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Spacer(modifier = Modifier.width(24.dp))
-                    Text(
-                        "Venta Inmediata",
+                    Text("Venta Inmediata",
                         style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
+                        fontWeight = FontWeight.Bold)
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.Default.Close, contentDescription = "Cerrar")
                     }
@@ -118,12 +93,10 @@ fun InstantSaleScreen(navController: NavController, pairCode: String = "USD/PEN"
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Input de cantidad
                 Text(
-                    text = "Cantidad de $baseCurrency",
+                    text     = "Cantidad de $baseCurrency",
                     modifier = Modifier.align(Alignment.Start),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
+                    fontSize = 14.sp, fontWeight = FontWeight.Medium
                 )
                 OutlinedTextField(
                     value = quantityText,
@@ -134,50 +107,82 @@ fun InstantSaleScreen(navController: NavController, pairCode: String = "USD/PEN"
                     shape = RoundedCornerShape(12.dp)
                 )
 
-                // Validaciones
-                if (quantityText.isNotEmpty() && !isValidValue) {
-                    Text("Valor inválido", color = Color.Red, fontSize = 12.sp, modifier = Modifier.align(Alignment.Start))
+                if (quantityText.isNotEmpty() && quantity <= 0.0)
+                    Text("Valor invalido", color = Color.Red, fontSize = 12.sp,
+                        modifier = Modifier.align(Alignment.Start))
+
+                // Spinner mientras calcula
+                if (previewLoading) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
 
-                // Card de resultados (segunda imagen)
-                if (isValidValue) {
+                // Resultados del preview real
+                preview?.let { p ->
                     Spacer(modifier = Modifier.height(16.dp))
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F2F5)),
-                        shape = RoundedCornerShape(12.dp)
+                        shape  = RoundedCornerShape(12.dp)
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            Text("Total: %.4f $quoteCurrency".format(totalQuote), fontWeight = FontWeight.Normal)
-                            Text("Precio: $priceDisplay", fontSize = 14.sp, color = Color.Gray)
-                            Text("Saldo disponible: %.4f $quoteCurrency".format(userQuoteBalance), fontSize = 14.sp, color = Color.Gray)
+                            Text("Recibiras: ${"%.4f".format(p.totalToReceive)} $quoteCurrency",
+                                fontWeight = FontWeight.Normal)
+                            val priceDisplay = if (p.minPrice == p.maxPrice)
+                                "Precio: ${"%.4f".format(p.avgPrice)}"
+                            else
+                                "Min: ${"%.4f".format(p.minPrice)}, Max: ${"%.4f".format(p.maxPrice)}, Avg: ${"%.4f".format(p.avgPrice)}"
+                            Text(priceDisplay, fontSize = 14.sp, color = Color.Gray)
+                            Text("Saldo disponible: ${"%.4f".format(p.availableBalance)} $baseCurrency",
+                                fontSize = 14.sp, color = Color.Gray)
                         }
                     }
+                    if (!p.hasEnoughBalance)
+                        Text("Saldo insuficiente", color = Color.Red, fontSize = 12.sp,
+                            modifier = Modifier.align(Alignment.Start).padding(top = 4.dp))
+                    if (!p.hasLiquidity)
+                        Text("Liquidez insuficiente", color = Color.Red, fontSize = 12.sp,
+                            modifier = Modifier.align(Alignment.Start).padding(top = 4.dp))
+                }
 
-                    if (!hasBalance) {
-                        Text("Saldo insuficiente", color = Color.Red, fontSize = 12.sp, modifier = Modifier.align(Alignment.Start).padding(top = 4.dp))
-                    }
-                    if (liquidityInsufficient) {
-                        Text("Liquidez insuficiente", color = Color.Red, fontSize = 12.sp, modifier = Modifier.align(Alignment.Start).padding(top = 4.dp))
-                    }
+                errorMsg?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(it, color = Color.Red, fontSize = 12.sp,
+                        modifier = Modifier.align(Alignment.Start))
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // Botón de Confirmar
                 Button(
                     onClick = {
-                        Toast.makeText(context, "Venta realizada con éxito. Notificación enviada al comprador.", Toast.LENGTH_LONG).show()
-                        navController.popBackStack()
+                        scope.launch {
+                            confirmLoading = true
+                            ExchangeRepository.executeInstantSale(user.usuarioId, cleanCode, quantity)
+                                .onSuccess { receipt ->
+                                    Toast.makeText(context,
+                                        "Venta realizada: ${"%.4f".format(receipt.soldAmount)} ${receipt.baseCurrency}" +
+                                                " -> ${"%.4f".format(receipt.receivedTotal)} ${receipt.quoteCurrency}",
+                                        Toast.LENGTH_LONG).show()
+                                    navController.popBackStack()
+                                }
+                                .onFailure { e ->
+                                    errorMsg = e.message ?: "Error al procesar la venta"
+                                }
+                            confirmLoading = false
+                        }
                     },
                     modifier = Modifier.fillMaxWidth().height(50.dp),
-                    enabled = canConfirm,
-                    colors = ButtonDefaults.buttonColors(
+                    enabled  = canConfirm,
+                    colors   = ButtonDefaults.buttonColors(
                         containerColor = if (canConfirm) Color(0xFF1A1C2E) else Color(0xFF8E8E93)
                     ),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Confirmar", color = Color.White)
+                    if (confirmLoading)
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp),
+                            color = Color.White, strokeWidth = 2.dp)
+                    else
+                        Text("Confirmar", color = Color.White)
                 }
             }
         }
