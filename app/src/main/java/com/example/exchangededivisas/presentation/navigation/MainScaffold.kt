@@ -35,7 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
-
+import androidx.compose.runtime.collectAsState
+import com.example.exchangededivisas.data.session.AppSession
 data class NavItem(
     val route: String,
     val label: String,
@@ -60,6 +61,7 @@ fun MainScaffold(
 ) {
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
+    val currentUser by AppSession.currentUser.collectAsState()
 
     Scaffold(
         bottomBar = {
@@ -70,6 +72,15 @@ fun MainScaffold(
                     .background(MaterialTheme.colorScheme.surface)
                     .padding(vertical = 8.dp)
             ) {
+                // Saludo con usuario de Supabase
+                Text(
+                    text = "Hola, ${currentUser.nombreUsuario}",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 2.dp)
+                )
                 // Dividimos las 7 en filas de 4
                 navItems.chunked(4).forEach { fila ->
                     Row(
