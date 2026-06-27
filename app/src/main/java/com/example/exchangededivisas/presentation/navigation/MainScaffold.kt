@@ -45,8 +45,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.compose.runtime.collectAsState
 import com.example.exchangededivisas.data.session.AppSession
+import com.example.exchangededivisas.data.repository.ExchangeRepository
+import com.example.exchangededivisas.data.repository.WalletCurrencyUi
+
 data class NavItem(
     val route: String,
     val label: String,
@@ -59,68 +61,9 @@ private val navItems = listOf(
     NavItem("currencies", "Monedas", Icons.Default.CurrencyExchange),
     NavItem("transactions", "Transacciones", Icons.Default.Description),
     NavItem("history", "Historial", Icons.Default.History),
-    NavItem("settings", "Configuración", Icons.Default.Settings),
+    NavItem("settings", "Config", Icons.Default.Settings),
     NavItem("logout", "Salir", Icons.AutoMirrored.Filled.ExitToApp)
 )
-
-@Composable
-fun WalletTopBar() {
-    val currentUser by AppSession.currentUser.collectAsState()
-    val refreshTick by AppSession.walletRefreshTick.collectAsState()
-
-    var balances by remember { mutableStateOf<List<WalletCurrencyUi>>(emptyList()) }
-
-    LaunchedEffect(currentUser.usuarioId, refreshTick) {
-        balances = ExchangeRepository.loadWallet(currentUser.usuarioId)
-            .filter { it.balance > 0.0 }
-            .sortedByDescending { it.balance }
-    }
-
-    LazyRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.primaryContainer)
-            .statusBarsPadding()
-            .padding(vertical = 10.dp, horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (balances.isEmpty()) {
-            item {
-                Text(
-                    text = "Sin saldos disponibles",
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    fontSize = 13.sp
-                )
-            }
-        }
-
-        items(balances) { currency ->
-            Card(
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = currency.code,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "%.2f".format(currency.balance),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
-        }
-    }
-}
 
 @Composable
 fun MainScaffold(
@@ -131,9 +74,23 @@ fun MainScaffold(
     val currentRoute = backStackEntry?.destination?.route
     val currentUser by AppSession.currentUser.collectAsState()
 
+    // Carga de balances
+    var balances by remember { mutableStateOf<List<WalletCurrencyUi>>(emptyList()) }
+    val walletTick by AppSession.walletRefreshTick.collectAsState()
+
+    LaunchedEffect(currentUser.usuarioId, walletTick) {
+        runCatching {
+            ExchangeRepository.loadWallet(currentUser.usuarioId)
+        }.onSuccess { list ->
+            balances = list.filter { it.balance > 0.0 }
+        }.onFailure {
+            balances = emptyList()
+        }
+    }
+
     Scaffold(
         topBar = {
-            WalletTopBar()
+            WalletTopBar(balances = balances)
         },
         bottomBar = {
             Column(
@@ -142,7 +99,7 @@ fun MainScaffold(
                     .background(MaterialTheme.colorScheme.surface)
                     .padding(vertical = 8.dp)
             ) {
-                // Saludo con usuario de Supabase
+                // Saludo con usuario
                 Text(
                     text = "Hola, ${currentUser.nombreUsuario}",
                     fontSize = 12.sp,
@@ -151,13 +108,12 @@ fun MainScaffold(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 2.dp)
                 )
-                // Dividimos las 7 en filas de 4
                 navItems.chunked(4).forEach { fila ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        row.forEach { item ->
+                        fila.forEach { item ->
                             NavBoton(
                                 item = item,
                                 seleccionado = currentRoute == item.route,
@@ -176,13 +132,54 @@ fun MainScaffold(
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
                 }
+                Spacer(modifier = Modifier.height(8.dp))
             }
         }
     ) { paddingValues ->
         Box(modifier = Modifier.padding(paddingValues)) {
             content()
+        }
+    }
+}
+
+@Composable
+private fun WalletTopBar(balances: List<WalletCurrencyUi>) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = "Tus Activos",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            if (balances.isEmpty()) {
+                Text("Sin saldo", fontSize = 12.sp)
+            } else {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    items(balances) { currency ->
+                        Column {
+                            Text(
+                                text = currency.code,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "%.2f".format(currency.balance),
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -197,12 +194,21 @@ private fun NavBoton(item: NavItem, seleccionado: Boolean, onClick: () -> Unit) 
 
     Column(
         modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(8.dp))
             .clickable { onClick() }
-            .padding(vertical = 6.dp, horizontal = 8.dp),
+            .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Icon(item.icon, contentDescription = item.label, tint = color)
-        Text(item.label, color = color, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Icon(
+            imageVector = item.icon,
+            contentDescription = item.label,
+            tint = color
+        )
+        Text(
+            text = item.label,
+            fontSize = 10.sp,
+            color = color,
+            fontWeight = if (seleccionado) FontWeight.Bold else FontWeight.Normal
+        )
     }
 }

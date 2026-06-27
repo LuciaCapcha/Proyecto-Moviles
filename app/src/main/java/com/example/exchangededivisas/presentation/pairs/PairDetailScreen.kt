@@ -51,8 +51,9 @@ fun PairDetailScreen(navController: NavController, code: String) {
     var chartData    by remember { mutableStateOf<CurrencyPairChartData?>(null) }
     var chartLoading by remember { mutableStateOf(true) }
 
-    // Libro de órdenes: ofertas de venta activas del par
+    // Libro de órdenes: ofertas y órdenes activas
     var sellOffers   by remember { mutableStateOf<List<ExchangeRepository.SellOfferUi>>(emptyList()) }
+    var buyOrders    by remember { mutableStateOf<List<ExchangeRepository.BuyOrderUi>>(emptyList()) }
     var offersLoading by remember { mutableStateOf(false) }
     var offersError   by remember { mutableStateOf<String?>(null) }
 
@@ -79,9 +80,18 @@ fun PairDetailScreen(navController: NavController, code: String) {
     LaunchedEffect(showOperations, code) {
         if (!showOperations) return@LaunchedEffect
         offersLoading = true
-        ExchangeRepository.getActiveSellOffers(code)
-            .onSuccess { sellOffers = it; offersError = null }
-            .onFailure { offersError = it.message }
+        
+        val sellResult = ExchangeRepository.getActiveSellOffers(code)
+        val buyResult = ExchangeRepository.getActiveBuyOrders(code)
+        
+        if (sellResult.isSuccess && buyResult.isSuccess) {
+            sellOffers = sellResult.getOrThrow()
+            buyOrders = buyResult.getOrThrow()
+            offersError = null
+        } else {
+            offersError = sellResult.exceptionOrNull()?.message ?: buyResult.exceptionOrNull()?.message
+        }
+        
         offersLoading = false
     }
 
@@ -203,18 +213,30 @@ fun PairDetailScreen(navController: NavController, code: String) {
         if (showOperations) {
             Spacer(modifier = Modifier.height(16.dp))
 
+            Text("Libro de Órdenes", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
+
             // Libro de órdenes real
             Row(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Ordenes de compra", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Text("—", fontSize = 12.sp, color = Color.Gray)
+                    Text("Ordenes de compra", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF2F80FF))
+                    when {
+                        offersLoading -> CircularProgressIndicator(modifier = Modifier.size(16.dp))
+                        offersError != null -> Text("-", fontSize = 12.sp, color = Color.Gray)
+                        buyOrders.isEmpty() -> Text("Sin órdenes", fontSize = 12.sp, color = Color.Gray)
+                        else -> buyOrders.take(5).forEach { order ->
+                            Text(
+                                "${"%.4f".format(order.price)} $quote — ${"%.2f".format(order.quantity)} $base",
+                                fontSize = 11.sp, color = Color.DarkGray
+                            )
+                        }
+                    }
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Ofertas de venta", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("Ofertas de venta", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF22C55E))
                     when {
                         offersLoading -> CircularProgressIndicator(modifier = Modifier.size(16.dp))
                         offersError != null -> Text("Error: $offersError", fontSize = 12.sp, color = Color.Red)
-                        sellOffers.isEmpty() -> Text("Sin ofertas activas", fontSize = 12.sp, color = Color.Gray)
+                        sellOffers.isEmpty() -> Text("Sin ofertas", fontSize = 12.sp, color = Color.Gray)
                         else -> sellOffers.take(5).forEach { offer ->
                             Text(
                                 "${"%.4f".format(offer.price)} $quote — ${"%.2f".format(offer.quantity)} $base",

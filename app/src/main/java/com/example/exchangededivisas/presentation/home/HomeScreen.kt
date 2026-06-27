@@ -96,6 +96,13 @@ fun HomeScreen(
             }
 
             is HomeUiState.Success -> {
+                if (state.isLoadingCharts) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().height(2.dp),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
                 // 1. Par más activo global
                 HistoricalChartCard(
                     title = "Par Más Activo del Mercado",

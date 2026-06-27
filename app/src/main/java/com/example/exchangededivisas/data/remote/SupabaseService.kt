@@ -126,8 +126,8 @@ interface SupabaseService {
 
     @GET("paresmoneda")
     suspend fun getParMoneda(
-        @Query("metalorigenid") monedaOrigenId: String,
-        @Query("mercadodestinoide") monedaDestinoId: String,
+        @Query("monedaorigenid") monedaOrigenId: String,
+        @Query("monedadestinoid") monedaDestinoId: String,
         @Query("activo") activo: String = "eq.true",
         @Query("limit") limit: Int = 1
     ): List<ParMonedaDto>
@@ -147,7 +147,8 @@ interface SupabaseService {
     @GET("ofertasventa")
     suspend fun getOfertasVentaByUser(
         @Query("usuarioid") usuarioId: String,
-        @Query("order") order: String = "fechacreacion.desc"
+        @Query("order") order: String = "fechacreacion.desc",
+        @Query("limit") limit: Int = 20
     ): List<OfertaVentaDto>
 
     @PATCH("ofertasventa")
@@ -165,7 +166,8 @@ interface SupabaseService {
     @GET("ordenescompra")
     suspend fun getOrdenesCompraByUser(
         @Query("usuarioid") usuarioId: String,
-        @Query("order") order: String = "fechacreacion.desc"
+        @Query("order") order: String = "fechacreacion.desc",
+        @Query("limit") limit: Int = 20
     ): List<OrdenCompraDto>
     @GET("ordenescompra")
     suspend fun getOrdenesCompraByPair(
@@ -207,6 +209,7 @@ interface SupabaseService {
     @GET("historicopreciospar")
     suspend fun getHistoricoByPar(
         @Query("parmonedaid") parMonedaId: String,
+        @Query("fecharegistro") fechaGte: String? = null,
         @Query("order") order: String = "fecharegistro.desc",
         @Query("limit") limit: Int = 50
     ): List<HistoricoPrecioParDto>
