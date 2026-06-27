@@ -37,6 +37,7 @@ fun PairDetailScreen(navController: NavController, code: String) {
     var selectedFilter    by remember { mutableStateOf("1d") }
     var showOperations    by remember { mutableStateOf(false) }
     var showSellOfferDialog by remember { mutableStateOf(false) }
+    var showBuyOrderDialog by remember { mutableStateOf(false) }
 
     val cleanCode = code.replace("_", "/")
     val codes     = cleanCode.split("/")
@@ -117,6 +118,31 @@ fun PairDetailScreen(navController: NavController, code: String) {
         )
     }
 
+    if (showBuyOrderDialog) {
+        BuyOrderDialog(
+            baseCurrency     = base,
+            quoteCurrency    = quote,
+            currentMinSell   = minSell,
+            availableBalance = userBalance,
+            onDismiss        = { showBuyOrderDialog = false },
+            onConfirm        = { amount, price ->
+                showBuyOrderDialog = false
+                scope.launch {
+                    ExchangeRepository.createBuyOrder(user.usuarioId, code, amount, price)
+                        .onSuccess {
+                            userBalance -= amount * price
+                            Toast.makeText(context,
+                                "Orden de compra generada. Se envio notificacion al correo.",
+                                Toast.LENGTH_LONG).show()
+                        }
+                        .onFailure { e ->
+                            Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                        }
+                }
+            }
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -143,6 +169,23 @@ fun PairDetailScreen(navController: NavController, code: String) {
                     selectedRange   = selectedFilter,
                     onRangeSelected = { selectedFilter = it }
                 )
+            }
+        }
+
+        // Texto grande: mayor compra (azul), menor venta (verde), margen (naranja)
+        chartData?.let { data ->
+            val mayorCompra = data.prices.maxOfOrNull { it.buyPrice }
+            val menorVenta  = data.prices.minOfOrNull { it.sellPrice }
+            val margen = if (mayorCompra != null && menorVenta != null) menorVenta - mayorCompra else null
+
+            Spacer(modifier = Modifier.height(20.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                BigStat("Mayor compra", mayorCompra, androidx.compose.ui.graphics.Color(0xFF2F80FF))
+                BigStat("Menor venta", menorVenta, androidx.compose.ui.graphics.Color(0xFF22C55E))
+                BigStat("Margen", margen, androidx.compose.ui.graphics.Color(0xFFFF9800))
             }
         }
 
@@ -185,7 +228,7 @@ fun PairDetailScreen(navController: NavController, code: String) {
             Spacer(modifier = Modifier.height(20.dp))
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { /* TODO: Orden Compra */ },
+                Button(onClick = { showBuyOrderDialog = true },
                     modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp)) {
                     Text("Orden Compra", fontSize = 11.sp)
                 }
@@ -297,6 +340,111 @@ fun SellOfferDialog(
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text("Total: %.4f $quoteCurrency".format(total), fontWeight = FontWeight.Bold)
+                        Text("Saldo disponible: %.4f $baseCurrency".format(availableBalance),
+                            fontSize = 12.sp, color = Color.Gray)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick  = { onConfirm(amount, price) },
+                enabled  = canConfirm,
+                modifier = Modifier.fillMaxWidth(),
+                shape    = RoundedCornerShape(8.dp),
+                colors   = ButtonDefaults.buttonColors(
+                    containerColor = if (canConfirm) Color(0xFF1A1C2E) else Color(0xFF8E8E93),
+                    contentColor   = Color.White
+                )
+            ) { Text("Confirmar") }
+        }
+    )
+}
+
+@Composable
+private fun BigStat(label: String, value: Double?, color: androidx.compose.ui.graphics.Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, fontSize = 12.sp, color = Color.Gray)
+        Text(
+            value?.let { "%.4f".format(it) } ?: "N/A",
+            color = color,
+            fontWeight = FontWeight.Bold,
+            fontSize = 20.sp
+        )
+    }
+}
+
+@Composable
+fun BuyOrderDialog(
+    baseCurrency: String,
+    quoteCurrency: String,
+    currentMinSell: Double,
+    availableBalance: Double,
+    onDismiss: () -> Unit,
+    onConfirm: (amount: Double, price: Double) -> Unit
+) {
+    var amountText by remember { mutableStateOf("") }
+    var priceText  by remember { mutableStateOf("%.4f".format(currentMinSell)) }
+
+    val amount = amountText.replace(",", ".").toDoubleOrNull() ?: 0.0
+    val price  = priceText.replace(",", ".").toDoubleOrNull()  ?: 0.0
+    val total  = amount * price
+
+    val isAmountValid = amount > 0
+    val isPriceValid  = price > 0
+    val hasBalance    = total <= availableBalance
+    val canConfirm    = isAmountValid && isPriceValid && hasBalance
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Generar Orden de Compra", style = MaterialTheme.typography.titleLarge)
+                IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Cerrar")
+                }
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column {
+                    Text("Cantidad de $baseCurrency a comprar", style = MaterialTheme.typography.labelMedium)
+                    OutlinedTextField(
+                        value = amountText, onValueChange = { amountText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        placeholder = { Text("0.00") },
+                        isError = (amountText.isNotBlank() && !isAmountValid) || (isAmountValid && isPriceValid && !hasBalance)
+                    )
+                    if (amountText.isNotBlank() && !isAmountValid)
+                        Text("Valor invalido", color = Color.Red, style = MaterialTheme.typography.bodySmall)
+                    else if (isAmountValid && isPriceValid && !hasBalance)
+                        Text("Saldo insuficiente", color = Color.Red, style = MaterialTheme.typography.bodySmall)
+                }
+                Column {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Precio Unitario ($quoteCurrency)", style = MaterialTheme.typography.labelMedium)
+                        Text("Actual: %.4f".format(currentMinSell),
+                            style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    }
+                    OutlinedTextField(
+                        value = priceText, onValueChange = { priceText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        isError = priceText.isNotBlank() && !isPriceValid
+                    )
+                    if (priceText.isNotBlank() && !isPriceValid)
+                        Text("Valor invalido", color = Color.Red, style = MaterialTheme.typography.bodySmall)
+                }
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F3F5)),
+                    shape  = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("Total a comprometer: %.4f $baseCurrency".format(total), fontWeight = FontWeight.Bold)
                         Text("Saldo disponible: %.4f $baseCurrency".format(availableBalance),
                             fontSize = 12.sp, color = Color.Gray)
                     }

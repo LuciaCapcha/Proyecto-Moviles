@@ -286,5 +286,16 @@ interface SupabaseService {
         @Body body: Map<String, @JvmSuppressWildcards Any?>
     ): List<UsuarioDto>
 
+    @GET("ofertasventa")
+    suspend fun getAllOfertasActivas(
+        @Query("estado") estado: String = "in.(Activa,Parcialmente ejecutada)"
+    ): List<OfertaVentaDto>
+
+    @POST("ordenescompra")
+    @Headers("Prefer: return=representation")
+    suspend fun insertOrdenCompra(
+        @Body body: Map<String, @JvmSuppressWildcards Any?>
+    ): List<OrdenCompraDto>
+
 }
 
