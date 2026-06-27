@@ -5,10 +5,15 @@ import com.example.exchangededivisas.data.remote.BilleteraDto
 import com.example.exchangededivisas.data.remote.MetodoPagoDto
 import com.example.exchangededivisas.data.remote.MonedaDto
 import com.example.exchangededivisas.data.remote.OfertaVentaDto
+import com.example.exchangededivisas.data.remote.HistoricoPrecioParDto
 import com.example.exchangededivisas.data.remote.ParMonedaDto
 import com.example.exchangededivisas.data.remote.SaldoBilleteraDto
 import com.example.exchangededivisas.data.session.AppSession
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import java.time.OffsetDateTime
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.math.max
 
@@ -81,6 +86,29 @@ private data class PlannedOfferExecution(
 object ExchangeRepository {
 
     private val api = ApiClient.supabase
+
+    suspend fun obtenerHistoricoGrafico(parId: Int, rangoTiempo: String): List<HistoricoPrecioParDto> {
+        val now = ZonedDateTime.now()
+        val formatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+
+        val startDateTime = when (rangoTiempo) {
+            "Último día" -> now.minusDays(1)
+            "Última semana" -> now.minusWeeks(1)
+            "Último mes" -> now.minusMonths(1)
+            "Último año" -> now.minusYears(1)
+            "Tiempo total" -> null
+            else -> null
+        }
+
+        val fechaFiltro = startDateTime?.let { "gte.${it.format(formatter)}" }
+
+        return ApiClient.supabaseApi.getHistoricoPrecios(
+            apiKey = ApiClient.SUPABASE_KEY,
+            token = "Bearer ${ApiClient.SUPABASE_KEY}",
+            parId = "eq.$parId",
+            fechaGte = fechaFiltro
+        )
+    }
 
     private fun nowIso(): String {
         return OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
@@ -828,39 +856,47 @@ object ExchangeRepository {
         return value.take(16).replace("T", " ")
     }
 
-    suspend fun loadHomeData(usuarioId: Int): HomeData {
+    suspend fun loadHomeData(usuarioId: Int): HomeData = coroutineScope {
         // 1. Obtener todos los pares activos
         val pares = api.getAllParesMoneda()
 
-        // 2. Para cada par, sumar volumen total del histórico
+        // 2. Ejecutar peticiones de volumen en PARALELO
         data class ParVolumen(val parMonedaId: Int, val volumenTotal: Double)
 
-        val volumenes = pares.map { par ->
-            val historico = api.getHistoricoByPar("eq.${par.parMonedaId}", limit = 100)
-            val volTotal = historico.sumOf { it.volumenCompra + it.volumenVenta }
-            ParVolumen(par.parMonedaId, volTotal)
-        }.sortedByDescending { it.volumenTotal }
+        val deferredVolumenes = pares.map { par ->
+            async {
+                val historico = try {
+                    api.getHistoricoByPar("eq.${par.parMonedaId}", limit = 100)
+                } catch (e: Exception) { emptyList() }
+                val volTotal = historico.sumOf { it.volumenCompra + it.volumenVenta }
+                ParVolumen(par.parMonedaId, volTotal)
+            }
+        }
+
+        val volumenes = deferredVolumenes.awaitAll().sortedByDescending { it.volumenTotal }
 
         // 3. Par más activo global
         val globalParId = volumenes.firstOrNull()?.parMonedaId
-        val globalChartData = if (globalParId != null) {
-            buildChartData(globalParId)
-        } else null
+        val globalChartDataDeferred = globalParId?.let { async { buildChartData(it) } }
 
         // 4. Par más operado por el usuario
-        val userOrders = api.getOrdenesCompraByUser("eq.$usuarioId")
-        val userOffers = api.getOfertasVentaByUser("eq.$usuarioId")
+        val userOrdersDeferred = async { try { api.getOrdenesCompraByUser("eq.$usuarioId") } catch(e: Exception) { emptyList() } }
+        val userOffersDeferred = async { try { api.getOfertasVentaByUser("eq.$usuarioId") } catch(e: Exception) { emptyList() } }
+
+        val userOrders = userOrdersDeferred.await()
+        val userOffers = userOffersDeferred.await()
 
         val userParCounts = mutableMapOf<Int, Int>()
         userOrders.forEach { userParCounts[it.parMonedaId] = (userParCounts[it.parMonedaId] ?: 0) + 1 }
         userOffers.forEach { userParCounts[it.parMonedaId] = (userParCounts[it.parMonedaId] ?: 0) + 1 }
 
         val userTopParId = userParCounts.maxByOrNull { it.value }?.key
-        val userChartData = if (userTopParId != null) {
-            buildChartData(userTopParId)
-        } else globalChartData // fallback al global si no tiene operaciones
+        val userChartDataDeferred = userTopParId?.let { async { buildChartData(it) } }
 
-        return HomeData(
+        val globalChartData = globalChartDataDeferred?.await()
+        val userChartData = userChartDataDeferred?.await() ?: globalChartData
+
+        HomeData(
             globalMostActive = globalChartData,
             userMostActive = userChartData,
             hasUserActivity = userTopParId != null

@@ -57,14 +57,6 @@ fun HomeScreen(
                 )
             }
         }
-        Button(
-            onClick = { navController.navigate("orderbook") },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp)
-        ) {
-            Text("Ver Libro de Órdenes USD/PEN")
-        }
 
         when (val state = uiState) {
             is HomeUiState.Loading -> {

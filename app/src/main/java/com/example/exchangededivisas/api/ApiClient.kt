@@ -34,6 +34,9 @@ object ApiClient {
         .build()
 
     val supabase: SupabaseService = retrofit.create(SupabaseService::class.java)
+    val supabaseApi: SupabaseApiService = retrofit.create(SupabaseApiService::class.java)
+
+    const val SUPABASE_KEY = API_KEY
 
     fun getClient(): Retrofit = retrofit
 }

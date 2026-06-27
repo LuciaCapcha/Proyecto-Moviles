@@ -70,11 +70,12 @@ data class RetiroDto(
     @SerializedName("voucherurl") val voucherUrl: String?,
     @SerializedName("fecharetiro") val fechaRetiro: String?
 )
+
 data class ParMonedaDto(
     @SerializedName("parmonedaid") val parMonedaId: Int,
-    @SerializedName("monedaorigenid") val monedaOrigenId: Int,
-    @SerializedName("monedadestinoid") val monedaDestinoId: Int,
-    @SerializedName("activo") val activo: Boolean?
+    @SerializedName("monedaorigenid") val monedaOrigenId: Int, // Ajustado a realidad API
+    @SerializedName("monedadestinoid") val monedaDestinoId: Int, // Ajustado a realidad API
+    @SerializedName("activo") val activo: Boolean
 )
 
 data class OfertaVentaDto(
@@ -156,11 +157,18 @@ data class NotificacionDto(
 data class HistoricoPrecioParDto(
     @SerializedName("historicoprecioid") val historicoPrecioId: Int,
     @SerializedName("parmonedaid") val parMonedaId: Int,
-    @SerializedName("mayorpreciocompra") val mayorPrecioCompra: Double?,
+    @SerializedName("mayorpreciocompra") val mayorPrecioCompra: Double?, // Ajustado a realidad API
     @SerializedName("menorprecioventa") val menorPrecioVenta: Double?,
     @SerializedName("volumencompra") val volumenCompra: Double,
     @SerializedName("volumenventa") val volumenVenta: Double,
     @SerializedName("fecharegistro") val fechaRegistro: String?
+)
+
+data class GraficoTooltipState(
+    val fechaHora: String,
+    val precioCompra: Double,
+    val precioVenta: Double,
+    val margen: Double
 )
 
 data class EjecucionOrdenDto(
@@ -178,7 +186,7 @@ data class HistorialTransaccionDto(
     @SerializedName("tipooperacion") val tipoOperacion: String,
     @SerializedName("referenciaid") val referenciaId: Int,
     @SerializedName("parmonedaid") val parMonedaId: Int?,
-    @SerializedName("monedaid") val monedaId: Int?,
+    @SerializedName("monoid") val monedaId: Int?,
     @SerializedName("fechahora") val fechaHora: String?,
     @SerializedName("estado") val estado: String,
     @SerializedName("metodoejecucion") val metodoEjecucion: String?
