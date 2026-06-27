@@ -24,8 +24,8 @@ fun OrderBookScreen(
     viewModel: OrderBookViewModel = viewModel()
 ) {
     // Cuando la pantalla abre, le dice al ViewModel que cargue los datos
-    LaunchedEffect(currencyPair) {
-        viewModel.loadOrderBook(currencyPair)
+    LaunchedEffect(Unit) {
+        viewModel.loadOrderBook(1) // 1 = par USD/PEN, ajusta según tu BD
     }
 
     // Escucha el estado actual del ViewModel (Loading, Success o Error)

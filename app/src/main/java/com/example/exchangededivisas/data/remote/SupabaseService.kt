@@ -167,7 +167,12 @@ interface SupabaseService {
         @Query("usuarioid") usuarioId: String,
         @Query("order") order: String = "fechacreacion.desc"
     ): List<OrdenCompraDto>
-
+    @GET("ordenescompra")
+    suspend fun getOrdenesCompraByPair(
+        @Query("parmonedaid") parMonedaId: String,
+        @Query("estado") estado: String = "in.(Activa,Parcialmente ejecutada)",
+        @Query("order") order: String = "preciounitario.desc,fechacreacion.asc"
+    ): List<OrdenCompraDto>
     @PATCH("ordenescompra")
     @Headers("Prefer: return=representation")
     suspend fun updateOrdenCompra(
