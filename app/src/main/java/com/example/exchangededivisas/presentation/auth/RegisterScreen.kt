@@ -36,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +49,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import com.example.exchangededivisas.data.repository.AuthRepository
+import kotlinx.coroutines.launch
 
 // Paleta del tema oscuro premium
 private val rFondoTop = Color(0xFF1A1340)
@@ -77,6 +80,11 @@ fun RegisterScreen(navController: NavController) {
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmVisible by remember { mutableStateOf(false) }
     var aceptaTerminos by remember { mutableStateOf(false) }
+
+    // NUEVO (HU-001): para llamar a la BD y mostrar errores
+    val scope = rememberCoroutineScope()
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
 
     // --- Validaciones de la US-001 (mínimo 8 sigue siendo lo obligatorio) ---
     val nameError = if (name.isNotBlank() && name.length < 2) "Mínimo 2 caracteres" else null
@@ -159,7 +167,7 @@ fun RegisterScreen(navController: NavController) {
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
-            label = { Text("Nombre completo") },
+            label = { Text("Nombre de usuario") },
             leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
             isError = nameError != null,
             supportingText = { if (nameError != null) Text(nameError) },
@@ -277,8 +285,21 @@ fun RegisterScreen(navController: NavController) {
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(
-            onClick = { navController.navigate("login") },
-            enabled = isFormValid,
+            onClick = {
+                errorMessage = null
+                isLoading = true
+                scope.launch {
+                    AuthRepository.register(name, email, password)
+                        .onSuccess {
+                            navController.navigate("home") {
+                                popUpTo("welcome") { inclusive = true }
+                            }
+                        }
+                        .onFailure { errorMessage = it.message }
+                    isLoading = false
+                }
+            },
+            enabled = isFormValid && !isLoading,
             shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = Color(0xFF22C55E),
@@ -288,7 +309,17 @@ fun RegisterScreen(navController: NavController) {
                 .fillMaxWidth()
                 .height(54.dp)
         ) {
-            Text("Registrarse", fontWeight = FontWeight.Bold, color = Color.White)
+            Text(
+                if (isLoading) "Registrando..." else "Registrarse",
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        }
+
+        // NUEVO (HU-001): muestra el error si algo falla (ej. correo repetido)
+        if (errorMessage != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(errorMessage!!, color = Color(0xFFFF6B6B), fontSize = 13.sp)
         }
 
         Spacer(modifier = Modifier.height(8.dp))

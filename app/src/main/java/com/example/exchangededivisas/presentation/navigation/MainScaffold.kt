@@ -30,27 +30,29 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
-// Importación del Mock de datos que definiste en CurrencyModel.kt
-import com.example.exchangededivisas.data.model.MockCurrencyData
-
+import androidx.compose.runtime.collectAsState
+import com.example.exchangededivisas.data.session.AppSession
 data class NavItem(
     val route: String,
     val label: String,
     val icon: ImageVector
 )
 
-// Las 7 opciones del prototipo
 private val navItems = listOf(
     NavItem("home", "Menú", Icons.Default.Home),
     NavItem("wallet", "Billetera", Icons.Default.AccountBalanceWallet),
@@ -63,18 +65,37 @@ private val navItems = listOf(
 
 @Composable
 fun WalletTopBar() {
-    val activeCurrencies = MockCurrencyData.list.filter { it.balance > 0 }
+    val currentUser by AppSession.currentUser.collectAsState()
+    val refreshTick by AppSession.walletRefreshTick.collectAsState()
+
+    var balances by remember { mutableStateOf<List<WalletCurrencyUi>>(emptyList()) }
+
+    LaunchedEffect(currentUser.usuarioId, refreshTick) {
+        balances = ExchangeRepository.loadWallet(currentUser.usuarioId)
+            .filter { it.balance > 0.0 }
+            .sortedByDescending { it.balance }
+    }
 
     LazyRow(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.primaryContainer)
-            .statusBarsPadding() // <-- AGREGA ESTA LÍNEA AQUÍ
+            .statusBarsPadding()
             .padding(vertical = 10.dp, horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        items(activeCurrencies) { currency ->
+        if (balances.isEmpty()) {
+            item {
+                Text(
+                    text = "Sin saldos disponibles",
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    fontSize = 13.sp
+                )
+            }
+        }
+
+        items(balances) { currency ->
             Card(
                 shape = RoundedCornerShape(8.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -91,7 +112,7 @@ fun WalletTopBar() {
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "$${currency.balance}",
+                        text = "%.2f".format(currency.balance),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -100,6 +121,7 @@ fun WalletTopBar() {
         }
     }
 }
+
 @Composable
 fun MainScaffold(
     navController: NavController,
@@ -107,33 +129,41 @@ fun MainScaffold(
 ) {
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
+    val currentUser by AppSession.currentUser.collectAsState()
 
     Scaffold(
         topBar = {
-            // Se agrega tu carrusel superior táctil en todas las pantallas de este Scaffold
             WalletTopBar()
         },
         bottomBar = {
-            // Barra en filas de 4 (porque son 7 opciones)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.surface)
                     .padding(vertical = 8.dp)
             ) {
+                // Saludo con usuario de Supabase
+                Text(
+                    text = "Hola, ${currentUser.nombreUsuario}",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 2.dp)
+                )
                 // Dividimos las 7 en filas de 4
                 navItems.chunked(4).forEach { fila ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        fila.forEach { item ->
+                        row.forEach { item ->
                             NavBoton(
                                 item = item,
                                 seleccionado = currentRoute == item.route,
                                 onClick = {
                                     if (item.route == "logout") {
-                                        // "Salir" vuelve al login
+                                        AppSession.logout()
                                         navController.navigate("login") {
                                             popUpTo(0)
                                         }
@@ -159,8 +189,11 @@ fun MainScaffold(
 
 @Composable
 private fun NavBoton(item: NavItem, seleccionado: Boolean, onClick: () -> Unit) {
-    val color = if (seleccionado) MaterialTheme.colorScheme.primary
-    else MaterialTheme.colorScheme.onSurfaceVariant
+    val color = if (seleccionado) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
 
     Column(
         modifier = Modifier

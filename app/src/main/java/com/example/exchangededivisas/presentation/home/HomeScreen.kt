@@ -14,9 +14,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavController
 
 @Composable
 fun HomeScreen(
+    navController: NavController,
     viewModel: HomeViewModel = viewModel(),
     onNavigateToLogin: () -> Unit = {},
     onNavigateToRegister: () -> Unit = {}
@@ -31,46 +33,79 @@ fun HomeScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Header (Ezchange + User info)
+        // Header
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "Ezchange", 
+                "Ezchange",
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold
             )
-            Text(
-                "Bienvenida, Lucia",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.Gray
-            )
+            when (val state = uiState) {
+                is HomeUiState.Success -> Text(
+                    text = "Bienvenido, ${state.userName}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+                else -> Text(
+                    text = "Cargando...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+            }
         }
 
         when (val state = uiState) {
             is HomeUiState.Loading -> {
-                Box(modifier = Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator()
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Cargando datos del mercado...")
+                    }
                 }
             }
+
             is HomeUiState.Error -> {
-                Text(
-                    text = state.message,
-                    color = MaterialTheme.colorScheme.error
-                )
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Text(
+                        text = state.message,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+                Button(
+                    onClick = { viewModel.loadDashboardData() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Reintentar")
+                }
             }
+
             is HomeUiState.Success -> {
-                // 1. Par Más Activo
+                // 1. Par más activo global
                 HistoricalChartCard(
-                    title = "Par Más Activo",
+                    title = "Par Más Activo del Mercado",
                     data = state.globalMostActive,
                     selectedRange = selectedRange,
                     onRangeSelected = { viewModel.setTimeRange(it) }
                 )
 
-                // 2. Auth Buttons or User Chart
+                // 2. Si no está logueado → botones auth
+                //    Si está logueado → su par más operado
                 if (!state.isLoggedIn) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -102,7 +137,10 @@ fun HomeScreen(
                     }
                 } else {
                     HistoricalChartCard(
-                        title = "Tu Par Más Operado",
+                        title = if (state.userMostActive != null)
+                            "Tu Par Más Operado"
+                        else
+                            "Par Destacado",
                         data = state.userMostActive,
                         selectedRange = selectedRange,
                         onRangeSelected = { viewModel.setTimeRange(it) }
@@ -110,7 +148,7 @@ fun HomeScreen(
                 }
             }
         }
-        
-        Spacer(modifier = Modifier.height(100.dp)) // Extra space for bottom nav
+
+        Spacer(modifier = Modifier.height(100.dp))
     }
 }

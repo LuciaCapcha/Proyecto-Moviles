@@ -1,14 +1,18 @@
 package com.example.exchangededivisas.presentation.auth
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -19,18 +23,19 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,170 +48,234 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-
-
-private val fondoTop = Color(0xFF1A1340)
-private val fondoBottom = Color(0xFF0B1020)
-private val campoFondo = Color(0xFF141A2E)
-private val borde = Color(0xFF2A3350)
-private val textoTenue = Color(0xFF9AA3BD)
-private val neon = Color(0xFF3B82F6)
-private val neonCyan = Color(0xFF22D3EE)
+import com.example.exchangededivisas.data.repository.AuthRepository
+import kotlinx.coroutines.launch
 
 @Composable
 fun LoginScreen(navController: NavController) {
-    var identifier by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+
+    var usernameOrEmail by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
+    var keepSession by remember { mutableStateOf(true) }
     var passwordVisible by remember { mutableStateOf(false) }
-    var mantenerSesion by remember { mutableStateOf(true) }
 
-    // Credenciales de usuario común
-    val usuarioValido = "lucia"
-    val correoValido = "lucia@esan.edu.pe"
-    val passwordValido = "12345678"
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
 
-    // Credenciales de Administrador para tu Historia de Usuario (US-018)
-    val adminUsuario = "admin"
-    val adminPassword = "admin123"
+    // El botón se habilita solo si ambos campos tienen texto (HU-002)
+    val isFormValid = usernameOrEmail.isNotBlank() && password.isNotBlank()
 
-    val isFormValid = identifier.isNotBlank() && password.isNotBlank()
-
-    val coloresCampo = OutlinedTextFieldDefaults.colors(
-        focusedContainerColor = campoFondo,
-        unfocusedContainerColor = campoFondo,
-        focusedBorderColor = neon,
-        unfocusedBorderColor = borde,
-        focusedTextColor = Color.White,
-        unfocusedTextColor = Color.White,
-        focusedLabelColor = neonCyan,
-        unfocusedLabelColor = textoTenue,
-        cursorColor = neonCyan,
-        focusedLeadingIconColor = neonCyan,
-        unfocusedLeadingIconColor = textoTenue,
-        focusedTrailingIconColor = neonCyan,
-        unfocusedTrailingIconColor = textoTenue
+    val darkBackground = Brush.verticalGradient(
+        colors = listOf(
+            Color(0xFF111032),
+            Color(0xFF080818)
+        )
     )
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(fondoTop, fondoBottom)))
-            .verticalScroll(rememberScrollState())
-            .padding(28.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+            .background(darkBackground)
+            .imePadding()
     ) {
-        Spacer(modifier = Modifier.height(48.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 28.dp, vertical = 30.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = "Bienvenido de nuevo",
+                color = Color.White,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold
+            )
 
-        EzchangeLogo()
+            Spacer(modifier = Modifier.height(8.dp))
 
-        Spacer(modifier = Modifier.height(40.dp))
+            Text(
+                text = "El mercado global de divisas, en tus manos.",
+                color = Color(0xFFB8B8CC),
+                fontSize = 16.sp
+            )
 
-        Text(
-            "Bienvenido de nuevo",
-            fontSize = 26.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.White,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            "El mercado global de divisas, en tus manos.",
-            color = textoTenue,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(34.dp))
 
-        OutlinedTextField(
-            value = identifier,
-            onValueChange = { identifier = it; error = null },
-            label = { Text("Correo o usuario") },
-            leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
-            singleLine = true,
-            shape = RoundedCornerShape(14.dp),
-            colors = coloresCampo,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(14.dp))
-
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it; error = null },
-            label = { Text("Contraseña") },
-            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
-            trailingIcon = {
-                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+            OutlinedTextField(
+                value = usernameOrEmail,
+                onValueChange = {
+                    usernameOrEmail = it
+                    errorMessage = null
+                },
+                label = { Text("Correo o usuario") },
+                leadingIcon = {
                     Icon(
-                        imageVector = if (passwordVisible) Icons.Default.Visibility
-                        else Icons.Default.VisibilityOff,
-                        contentDescription = null
+                        Icons.Default.Email,
+                        contentDescription = null,
+                        tint = Color(0xFFB8B8CC)
+                    )
+                },
+                singleLine = true,
+                enabled = !isLoading,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                modifier = Modifier.fillMaxWidth(),
+                colors = loginTextFieldColors()
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedTextField(
+                value = password,
+                onValueChange = {
+                    password = it
+                    errorMessage = null
+                },
+                label = { Text("Contraseña") },
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = Color.Cyan
+                    )
+                },
+                trailingIcon = {
+                    IconButton(
+                        onClick = { passwordVisible = !passwordVisible },
+                        enabled = !isLoading
+                    ) {
+                        Icon(
+                            imageVector = if (passwordVisible) {
+                                Icons.Default.VisibilityOff
+                            } else {
+                                Icons.Default.Visibility
+                            },
+                            contentDescription = null,
+                            tint = Color.Cyan
+                        )
+                    }
+                },
+                visualTransformation = if (passwordVisible) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
+                singleLine = true,
+                enabled = !isLoading,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier.fillMaxWidth(),
+                colors = loginTextFieldColors()
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = keepSession,
+                    onCheckedChange = { keepSession = it },
+                    enabled = !isLoading
+                )
+
+                Text(
+                    text = "Mantener sesión iniciada",
+                    color = Color(0xFFB8B8CC),
+                    fontSize = 14.sp
+                )
+            }
+
+            if (errorMessage != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = errorMessage!!,
+                    color = Color(0xFFFF5B6E),
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Button(
+                onClick = {
+                    scope.launch {
+                        isLoading = true
+                        errorMessage = null
+
+                        AuthRepository.login(
+                            usernameOrEmail = usernameOrEmail,
+                            password = password
+                        ).onSuccess { user ->
+                            if (user.rolId == 2) {
+                                navController.navigate("admin_dashboard") {
+                                    popUpTo("login") { inclusive = true }
+                                }
+                            } else {
+                                navController.navigate("home") {
+                                    popUpTo("login") { inclusive = true }
+                                }
+                            }
+                        }.onFailure { error ->
+                            errorMessage = error.message ?: "Credenciales inválidas"
+                        }
+
+                        isLoading = false
+                    }
+                },
+                enabled = isFormValid && !isLoading,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .width(22.dp)
+                            .height(22.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Text("Validando...")
+                } else {
+                    Text(
+                        text = "Iniciar Sesión",
+                        fontWeight = FontWeight.Bold
                     )
                 }
-            },
-            visualTransformation = if (passwordVisible) VisualTransformation.None
-            else PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            singleLine = true,
-            shape = RoundedCornerShape(14.dp),
-            colors = coloresCampo,
-            modifier = Modifier.fillMaxWidth()
-        )
+            }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Checkbox(checked = mantenerSesion, onCheckedChange = { mantenerSesion = it })
-            Text("Mantener sesión iniciada", color = textoTenue, fontSize = 13.sp)
-        }
+            Spacer(modifier = Modifier.height(28.dp))
 
-        if (error != null) {
-            Text(error!!, color = Color(0xFFFF6B6B), modifier = Modifier.fillMaxWidth())
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        Button(
-            onClick = {
-                // 1. Verificación del Rol Administrador (Criterio de Aceptación)
-                if (identifier == adminUsuario && password == adminPassword) {
-                    navController.navigate("admin_dashboard") {
-                        popUpTo("login") { inclusive = true }
+            Text(
+                text = "¿Eres nuevo en Ezchange? Crea una cuenta",
+                color = Color.Cyan,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .clickable(enabled = !isLoading) {
+                        navController.navigate("register")
                     }
-                }
-                // 2. Verificación de Usuario Común
-                else if ((identifier == usuarioValido || identifier == correoValido) && password == passwordValido) {
-                    navController.navigate("home") {
-                        popUpTo("login") { inclusive = true }
-                    }
-                }
-                // 3. Error si no coincide ninguna credencial
-                else {
-                    error = "Credenciales inválidas"
-                }
-            },
-            enabled = isFormValid,
-            shape = RoundedCornerShape(14.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = neon,
-                disabledContainerColor = neon.copy(alpha = 0.4f)
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(54.dp)
-        ) {
-            Text("Iniciar Sesión", fontWeight = FontWeight.Bold, color = Color.White)
+            )
         }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        TextButton(onClick = { navController.navigate("register") }) {
-            Text("¿Eres nuevo en Ezchange? Crea una cuenta", color = neonCyan, fontSize = 14.sp)
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
     }
 }
+
+@Composable
+private fun loginTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = Color.White,
+    unfocusedTextColor = Color.White,
+    disabledTextColor = Color(0xFFB8B8CC),
+    focusedBorderColor = Color(0xFF2F80FF),
+    unfocusedBorderColor = Color(0xFF33415C),
+    disabledBorderColor = Color(0xFF33415C),
+    focusedLabelColor = Color.Cyan,
+    unfocusedLabelColor = Color(0xFFB8B8CC),
+    disabledLabelColor = Color(0xFF77778A),
+    cursorColor = Color.Cyan
+)
