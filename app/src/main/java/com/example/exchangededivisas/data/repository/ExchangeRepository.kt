@@ -900,4 +900,390 @@ object ExchangeRepository {
         val userMostActive: com.example.exchangededivisas.data.model.CurrencyPairChartData?,
         val hasUserActivity: Boolean
     )
+    // ── PARES DE MONEDAS ─────────────────────────────────────────────────────
+
+    data class PairUi(
+        val parMonedaId: Int,
+        val fromCode: String,
+        val toCode: String,
+        val fromName: String,
+        val toName: String,
+        val bestBuy: Double?,
+        val bestSell: Double?,
+        val margin: Double?,
+        val volume: Double
+    )
+
+    data class SellOfferUi(
+        val ofertaId: Int,
+        val quantity: Double,
+        val price: Double,
+        val total: Double
+    )
+
+    data class InstantSalePreview(
+        val pairCode: String,
+        val baseCurrency: String,
+        val quoteCurrency: String,
+        val requestedAmount: Double,
+        val coveredAmount: Double,
+        val totalToReceive: Double,
+        val minPrice: Double,
+        val maxPrice: Double,
+        val avgPrice: Double,
+        val availableBalance: Double,
+        val hasLiquidity: Boolean,
+        val hasEnoughBalance: Boolean
+    )
+
+    data class InstantSaleReceipt(
+        val operationId: Int,
+        val soldAmount: Double,
+        val receivedTotal: Double,
+        val baseCurrency: String,
+        val quoteCurrency: String
+    )
+
+    data class WithdrawItem(
+        val monedaId: Int,
+        val code: String,
+        val amount: Double
+    )
+
+    data class WithdrawReceipt(
+        val totalWithdrawn: Map<String, Double>,
+        val commission: Double,
+        val netReceived: Double
+    )
+
+    /** Carga todos los pares activos con sus precios reales de Supabase */
+    suspend fun getAllPairs(): Result<List<PairUi>> {
+        return runCatching {
+            val monedas = api.getMonedas().associateBy { it.monedaId }
+            val pares   = api.getAllParesMoneda()
+
+            pares.mapNotNull { par ->
+                val from = monedas[par.monedaOrigenId]  ?: return@mapNotNull null
+                val to   = monedas[par.monedaDestinoId] ?: return@mapNotNull null
+
+                val offers = runCatching {
+                    api.getOfertasVentaByPair("eq.${par.parMonedaId}")
+                        .filter { isActiveStatus(it.estado) }
+                }.getOrElse { emptyList() }
+
+                // También intentamos historial para tener precio de compra real
+                val historico = runCatching {
+                    api.getHistoricoByPar("eq.${par.parMonedaId}", limit = 1)
+                }.getOrElse { emptyList() }
+
+                val bestSell = offers.minByOrNull { it.precioUnitario }?.precioUnitario
+                    ?: historico.firstOrNull()?.menorPrecioVenta
+                val bestBuy  = historico.firstOrNull()?.mayorPrecioCompra
+                    ?: bestSell?.let { it * 0.99 }
+                val volume   = offers.sumOf { it.cantidadPendiente }
+                val margin   = if (bestBuy != null && bestSell != null) bestSell - bestBuy else null
+
+                PairUi(
+                    parMonedaId = par.parMonedaId,
+                    fromCode    = from.codigoIso.trim(),
+                    toCode      = to.codigoIso.trim(),
+                    fromName    = from.nombre,
+                    toName      = to.nombre,
+                    bestBuy     = bestBuy,
+                    bestSell    = bestSell,
+                    margin      = margin,
+                    volume      = volume
+                )
+            }
+        }
+    }
+
+    /** Historial de precios real de un par para el gráfico */
+    suspend fun getPairChartData(
+        pairCode: String
+    ): Result<com.example.exchangededivisas.data.model.CurrencyPairChartData> {
+        return runCatching {
+            val (fromCode, toCode) = parsePairCode(pairCode)
+            val from = getCurrencyByCode(fromCode)
+            val to   = getCurrencyByCode(toCode)
+            val pair = getPairOrThrow(from.monedaId, to.monedaId)
+            buildChartData(pair.parMonedaId)
+        }
+    }
+
+    /** Ofertas de venta activas de un par (libro de órdenes) */
+    suspend fun getActiveSellOffers(pairCode: String): Result<List<SellOfferUi>> {
+        return runCatching {
+            val (fromCode, toCode) = parsePairCode(pairCode)
+            val from = getCurrencyByCode(fromCode)
+            val to   = getCurrencyByCode(toCode)
+            val pair = getPairOrThrow(from.monedaId, to.monedaId)
+
+            api.getOfertasVentaByPair("eq.${pair.parMonedaId}")
+                .filter { isActiveStatus(it.estado) }
+                .sortedBy { it.precioUnitario }
+                .map {
+                    SellOfferUi(
+                        ofertaId = it.ofertaVentaId,
+                        quantity = it.cantidadPendiente,
+                        price    = it.precioUnitario,
+                        total    = it.cantidadPendiente * it.precioUnitario
+                    )
+                }
+        }
+    }
+
+    /** Inserta una oferta de venta del usuario */
+    suspend fun createSellOffer(
+        usuarioId: Int,
+        pairCode: String,
+        amount: Double,
+        price: Double
+    ): Result<Unit> {
+        return runCatching {
+            require(amount > 0.0) { "Cantidad inválida" }
+            require(price > 0.0)  { "Precio inválido" }
+
+            val (fromCode, toCode) = parsePairCode(pairCode)
+            val from = getCurrencyByCode(fromCode)
+            val to   = getCurrencyByCode(toCode)
+            val pair = getPairOrThrow(from.monedaId, to.monedaId)
+
+            val available = getAvailableBalance(usuarioId, from.monedaId)
+            require(available >= amount) { "Saldo insuficiente" }
+
+            val now = nowIso()
+            val (before, after) = subtractBalance(usuarioId, from.monedaId, amount)
+
+            val oferta = api.insertOfertaVenta(
+                mapOf(
+                    "usuarioid"          to usuarioId,
+                    "parmonedaid"        to pair.parMonedaId,
+                    "cantidadoriginal"   to amount,
+                    "cantidadvendida"    to 0.0,
+                    "cantidadpendiente"  to amount,
+                    "preciounitario"     to price,
+                    "totalesperado"      to amount * price,
+                    "totalrecibido"      to 0.0,
+                    "estado"             to "Activa",
+                    "fechacreacion"      to now,
+                    "fechaactualizacion" to now,
+                    "fechacancelacion"   to null,
+                    "ordencompraespejoid" to null
+                )
+            ).first()
+
+            insertWalletMovement(
+                usuarioId, from.monedaId, "OfertaVenta", amount,
+                before, after, "ofertasventa", oferta.ofertaVentaId, now
+            )
+
+            api.insertHistorial(mapOf(
+                "usuarioid"       to usuarioId,
+                "tipooperacion"   to "Oferta de venta",
+                "referenciaid"    to oferta.ofertaVentaId,
+                "parmonedaid"     to pair.parMonedaId,
+                "monedaid"        to null,
+                "fechahora"       to now,
+                "estado"          to "Activa",
+                "metodoejecucion" to "Normal"
+            ))
+
+            val correo = api.getUsuarioById("eq.$usuarioId").firstOrNull()
+                ?.correoElectronico ?: "correo@pendiente.com"
+            api.insertNotificacionCorreo(mapOf(
+                "usuarioid"         to usuarioId,
+                "tiponotificacionid" to null,
+                "correodestino"     to correo,
+                "tipoevento"        to "OFERTA_CREADA",
+                "asunto"            to "Tu oferta de venta fue registrada",
+                "cuerpo"            to "Oferta de %.4f %s a precio %.4f %s creada correctamente."
+                    .format(amount, from.codigoIso.trim(), price, to.codigoIso.trim()),
+                "estadoenvio"       to "Pendiente",
+                "fechacreacion"     to now,
+                "fechaenvio"        to null,
+                "referenciatipo"    to "ofertasventa",
+                "referenciaid"      to oferta.ofertaVentaId
+            ))
+
+            AppSession.notifyWalletChanged()
+        }
+    }
+
+    /** Preview de venta inmediata (sin ejecutar) */
+    suspend fun previewInstantSale(
+        usuarioId: Int,
+        pairCode: String,
+        amount: Double
+    ): Result<InstantSalePreview> {
+        return runCatching {
+            require(amount > 0.0) { "Valor inválido" }
+            val (baseCode, quoteCode) = parsePairCode(pairCode)
+            val base  = getCurrencyByCode(baseCode)
+            val quote = getCurrencyByCode(quoteCode)
+            val pair  = getPairOrThrow(base.monedaId, quote.monedaId)
+
+            // Para venta inmediata el usuario entrega BASE y recibe QUOTE
+            // Consume las órdenes de compra activas del mercado que mejor paguen
+            val offers = api.getOfertasVentaByPair("eq.${pair.parMonedaId}")
+                .filter { isActiveStatus(it.estado) && it.usuarioId != usuarioId }
+                .sortedByDescending { it.precioUnitario }
+
+            val planned      = planOfferExecutions(offers, amount)
+            val covered      = planned.sumOf { it.amountTaken }
+            val totalReceive = planned.sumOf { it.subtotal }
+            val prices       = planned.map { it.offer.precioUnitario }
+            val available    = getAvailableBalance(usuarioId, base.monedaId)
+
+            InstantSalePreview(
+                pairCode         = "${base.codigoIso.trim()}_${quote.codigoIso.trim()}",
+                baseCurrency     = base.codigoIso.trim(),
+                quoteCurrency    = quote.codigoIso.trim(),
+                requestedAmount  = amount,
+                coveredAmount    = covered,
+                totalToReceive   = totalReceive,
+                minPrice         = prices.minOrNull() ?: 0.0,
+                maxPrice         = prices.maxOrNull() ?: 0.0,
+                avgPrice         = if (covered > 0.0) totalReceive / covered else 0.0,
+                availableBalance = available,
+                hasLiquidity     = covered >= amount,
+                hasEnoughBalance = available >= amount
+            )
+        }
+    }
+
+    /** Ejecuta la venta inmediata contra las ofertas activas del mercado */
+    suspend fun executeInstantSale(
+        usuarioId: Int,
+        pairCode: String,
+        amount: Double
+    ): Result<InstantSaleReceipt> {
+        return runCatching {
+            require(amount > 0.0) { "Valor inválido" }
+            val (baseCode, quoteCode) = parsePairCode(pairCode)
+            val base  = getCurrencyByCode(baseCode)
+            val quote = getCurrencyByCode(quoteCode)
+            val pair  = getPairOrThrow(base.monedaId, quote.monedaId)
+
+            val offers = api.getOfertasVentaByPair("eq.${pair.parMonedaId}")
+                .filter { isActiveStatus(it.estado) && it.usuarioId != usuarioId }
+                .sortedByDescending { it.precioUnitario }
+
+            val planned      = planOfferExecutions(offers, amount)
+            val covered      = planned.sumOf { it.amountTaken }
+            require(covered >= amount) { "Liquidez insuficiente" }
+
+            val totalReceive = planned.sumOf { it.subtotal }
+            val available    = getAvailableBalance(usuarioId, base.monedaId)
+            require(available >= amount) { "Saldo insuficiente" }
+
+            val prices = planned.map { it.offer.precioUnitario }
+            val now    = nowIso()
+
+            val operation = api.insertOperacionInmediata(mapOf(
+                "usuarioid"         to usuarioId,
+                "parmonedaid"       to pair.parMonedaId,
+                "tipooperacion"     to "Venta inmediata",
+                "metodoejecucion"   to "Normal",
+                "cantidadsolicitada" to amount,
+                "cantidadejecutada" to covered,
+                "preciominimo"      to (prices.minOrNull() ?: 0.0),
+                "preciomaximo"      to (prices.maxOrNull() ?: 0.0),
+                "preciopromedio"    to if (covered > 0.0) totalReceive / covered else 0.0,
+                "totalpagado"       to amount,
+                "totalrecibido"     to totalReceive,
+                "estado"            to "Completada",
+                "fechaoperacion"    to now,
+                "operacionpadreid"  to null
+            )).first()
+
+            val (sbBefore, sbAfter) = subtractBalance(usuarioId, base.monedaId, amount)
+            insertWalletMovement(usuarioId, base.monedaId, "VentaInmediata", amount,
+                sbBefore, sbAfter, "operacionesinmediatas", operation.operacionInmediataId, now)
+
+            val (sqBefore, sqAfter) = addBalance(usuarioId, quote.monedaId, totalReceive)
+            insertWalletMovement(usuarioId, quote.monedaId, "VentaInmediata", totalReceive,
+                sqBefore, sqAfter, "operacionesinmediatas", operation.operacionInmediataId, now)
+
+            planned.forEach { execution ->
+                val offer      = execution.offer
+                val newPending = max(0.0, offer.cantidadPendiente - execution.amountTaken)
+                api.updateOfertaVenta("eq.${offer.ofertaVentaId}", mapOf(
+                    "cantidadvendida"    to offer.cantidadVendida + execution.amountTaken,
+                    "cantidadpendiente"  to newPending,
+                    "estado"             to if (newPending <= 0.000001) "Completada" else "Parcialmente ejecutada",
+                    "fechaactualizacion" to now
+                ))
+                val buyerEmail = api.getUsuarioById("eq.${offer.usuarioId}").firstOrNull()
+                    ?.correoElectronico ?: "correo@pendiente.com"
+                api.insertNotificacionCorreo(mapOf(
+                    "usuarioid" to offer.usuarioId, "tiponotificacionid" to null,
+                    "correodestino" to buyerEmail, "tipoevento" to "PROGRESO_OFERTA",
+                    "asunto" to "Tu oferta recibio una venta",
+                    "cuerpo" to "Se ejecutaron %.2f %s de tu oferta."
+                        .format(execution.amountTaken, base.codigoIso.trim()),
+                    "estadoenvio" to "Pendiente", "fechacreacion" to now,
+                    "fechaenvio" to null, "referenciatipo" to "operacionesinmediatas",
+                    "referenciaid" to operation.operacionInmediataId
+                ))
+            }
+
+            api.insertHistorial(mapOf(
+                "usuarioid" to usuarioId, "tipooperacion" to "Venta inmediata",
+                "referenciaid" to operation.operacionInmediataId,
+                "parmonedaid" to pair.parMonedaId, "monedaid" to null,
+                "fechahora" to now, "estado" to "Completada", "metodoejecucion" to "Normal"
+            ))
+
+            AppSession.notifyWalletChanged()
+            InstantSaleReceipt(operation.operacionInmediataId, covered, totalReceive,
+                base.codigoIso.trim(), quote.codigoIso.trim())
+        }
+    }
+
+    /** Ejecuta retiro descontando saldo real de la billetera */
+    suspend fun executeWithdraw(
+        usuarioId: Int,
+        items: List<WithdrawItem>,
+        metodoPagoId: Int,
+        comisionPorcentaje: Double
+    ): Result<WithdrawReceipt> {
+        return runCatching {
+            require(items.isNotEmpty()) { "Selecciona al menos una moneda" }
+            items.forEach { require(it.amount > 0.0) { "Monto invalido para ${it.code}" } }
+
+            val now      = nowIso()
+            val subtotal = items.sumOf { it.amount }
+            val commission = subtotal * comisionPorcentaje
+            val net      = subtotal - commission
+
+            items.forEach { item ->
+                val (before, after) = subtractBalance(usuarioId, item.monedaId, item.amount)
+                val deposito = api.insertDeposito(mapOf(
+                    "usuarioid"        to usuarioId,
+                    "monedaid"         to item.monedaId,
+                    "metodopagoid"     to metodoPagoId,
+                    "montodepositado"  to item.amount,
+                    "comisionaplicada" to (item.amount * comisionPorcentaje),
+                    "montoneto"        to (item.amount * (1 - comisionPorcentaje)),
+                    "estado"           to "Completado",
+                    "fechadeposito"    to now,
+                    "fechaactualizacion" to now
+                )).first()
+
+                insertWalletMovement(usuarioId, item.monedaId, "Retiro", item.amount,
+                    before, after, "depositos", deposito.depositoId, now)
+
+                api.insertHistorial(mapOf(
+                    "usuarioid" to usuarioId, "tipooperacion" to "Retiro",
+                    "referenciaid" to deposito.depositoId, "parmonedaid" to null,
+                    "monedaid" to item.monedaId, "fechahora" to now,
+                    "estado" to "Completado", "metodoejecucion" to "Normal"
+                ))
+            }
+
+            AppSession.notifyWalletChanged()
+            WithdrawReceipt(items.associate { it.code to it.amount }, commission, net)
+        }
+    }
 }

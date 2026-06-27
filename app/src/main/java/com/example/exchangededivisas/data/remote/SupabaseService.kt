@@ -152,6 +152,11 @@ interface SupabaseService {
         @Body body: Map<String, @JvmSuppressWildcards Any?>
     ): List<OfertaVentaDto>
 
+    @POST("ofertasventa")
+    @Headers("Prefer: return=representation")
+    suspend fun insertOfertaVenta(
+        @Body body: Map<String, @JvmSuppressWildcards Any?>
+    ): List<OfertaVentaDto>
     @GET("ordenescompra")
     suspend fun getOrdenesCompraByUser(
         @Query("usuarioid") usuarioId: String,
