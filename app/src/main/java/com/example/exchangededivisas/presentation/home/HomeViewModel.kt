@@ -1,0 +1,64 @@
+package com.example.exchangededivisas.presentation.home
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.exchangededivisas.data.model.CurrencyPairChartData
+import com.example.exchangededivisas.data.repository.ExchangeRepository
+import com.example.exchangededivisas.data.session.AppSession
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+
+sealed class HomeUiState {
+    object Loading : HomeUiState()
+    data class Success(
+        val globalMostActive: CurrencyPairChartData?,
+        val userMostActive: CurrencyPairChartData?,
+        val isLoggedIn: Boolean,
+        val userName: String
+    ) : HomeUiState()
+    data class Error(val message: String) : HomeUiState()
+}
+
+class HomeViewModel : ViewModel() {
+
+    private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
+    val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+
+    private val _selectedRange = MutableStateFlow("1d")
+    val selectedRange: StateFlow<String> = _selectedRange.asStateFlow()
+
+    init {
+        loadDashboardData()
+    }
+
+    fun setTimeRange(range: String) {
+        _selectedRange.value = range
+        loadDashboardData()
+    }
+
+    fun loadDashboardData() {
+        viewModelScope.launch {
+            _uiState.value = HomeUiState.Loading
+            try {
+                val currentUser = AppSession.currentUser.value
+                val isLoggedIn = currentUser.usuarioId != 0
+                        && currentUser.estado == "Activo"
+
+                val homeData = ExchangeRepository.loadHomeData(currentUser.usuarioId)
+
+                _uiState.value = HomeUiState.Success(
+                    globalMostActive = homeData.globalMostActive,
+                    userMostActive = homeData.userMostActive,
+                    isLoggedIn = isLoggedIn,
+                    userName = currentUser.nombreUsuario
+                )
+            } catch (e: Exception) {
+                _uiState.value = HomeUiState.Error(
+                    "Error al cargar datos: ${e.message}"
+                )
+            }
+        }
+    }
+}

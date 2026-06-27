@@ -10,6 +10,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
@@ -19,16 +23,22 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -43,7 +53,6 @@ data class NavItem(
     val icon: ImageVector
 )
 
-// Las 7 opciones del prototipo
 private val navItems = listOf(
     NavItem("home", "Menú", Icons.Default.Home),
     NavItem("wallet", "Billetera", Icons.Default.AccountBalanceWallet),
@@ -55,6 +64,65 @@ private val navItems = listOf(
 )
 
 @Composable
+fun WalletTopBar() {
+    val currentUser by AppSession.currentUser.collectAsState()
+    val refreshTick by AppSession.walletRefreshTick.collectAsState()
+
+    var balances by remember { mutableStateOf<List<WalletCurrencyUi>>(emptyList()) }
+
+    LaunchedEffect(currentUser.usuarioId, refreshTick) {
+        balances = ExchangeRepository.loadWallet(currentUser.usuarioId)
+            .filter { it.balance > 0.0 }
+            .sortedByDescending { it.balance }
+    }
+
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .statusBarsPadding()
+            .padding(vertical = 10.dp, horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (balances.isEmpty()) {
+            item {
+                Text(
+                    text = "Sin saldos disponibles",
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    fontSize = 13.sp
+                )
+            }
+        }
+
+        items(balances) { currency ->
+            Card(
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = currency.code,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "%.2f".format(currency.balance),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun MainScaffold(
     navController: NavController,
     content: @Composable () -> Unit
@@ -64,8 +132,10 @@ fun MainScaffold(
     val currentUser by AppSession.currentUser.collectAsState()
 
     Scaffold(
+        topBar = {
+            WalletTopBar()
+        },
         bottomBar = {
-            // Barra en filas de 4 (porque son 7 opciones)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -87,13 +157,13 @@ fun MainScaffold(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        fila.forEach { item ->
+                        row.forEach { item ->
                             NavBoton(
                                 item = item,
                                 seleccionado = currentRoute == item.route,
                                 onClick = {
                                     if (item.route == "logout") {
-                                        // "Salir" vuelve al login
+                                        AppSession.logout()
                                         navController.navigate("login") {
                                             popUpTo(0)
                                         }
@@ -119,8 +189,11 @@ fun MainScaffold(
 
 @Composable
 private fun NavBoton(item: NavItem, seleccionado: Boolean, onClick: () -> Unit) {
-    val color = if (seleccionado) MaterialTheme.colorScheme.primary
-    else MaterialTheme.colorScheme.onSurfaceVariant
+    val color = if (seleccionado) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
 
     Column(
         modifier = Modifier
