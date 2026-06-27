@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
@@ -83,9 +85,9 @@ fun HistoricalChartCard(
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             if (data == null || data.prices.isEmpty()) {
                 Box(
                     modifier = Modifier
@@ -107,14 +109,15 @@ fun HistoricalChartCard(
                     maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
-                
+
                 Spacer(modifier = Modifier.height(12.dp))
-                
+
                 TimeRangeSelector(selectedRange, onRangeSelected)
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
-                
-                AndroidChart(data)
+
+                val filteredData = remember(data, selectedRange) { filterByRange(data, selectedRange) }
+                key(selectedRange) { AndroidChart(filteredData) }
             }
         }
     }
@@ -124,7 +127,7 @@ fun HistoricalChartCard(
 private fun AndroidChart(data: CurrencyPairChartData) {
     val blueColor = Color.BLUE
     val greenColor = Color.GREEN
-    
+
     AndroidView(
         factory = { context ->
             LineChart(context).apply {
@@ -134,22 +137,22 @@ private fun AndroidChart(data: CurrencyPairChartData) {
                 setScaleEnabled(true)
                 setPinchZoom(true)
                 setDrawGridBackground(false)
-                
+
                 xAxis.position = XAxis.XAxisPosition.BOTTOM
                 xAxis.setDrawGridLines(true)
                 xAxis.gridColor = Color.LTGRAY
                 xAxis.setDrawLabels(true)
-                
+
                 axisLeft.setDrawGridLines(true)
                 axisLeft.gridColor = Color.LTGRAY
                 axisRight.isEnabled = false
-                
+
                 legend.isEnabled = true
                 legend.verticalAlignment = Legend.LegendVerticalAlignment.BOTTOM
                 legend.horizontalAlignment = Legend.LegendHorizontalAlignment.CENTER
                 legend.orientation = Legend.LegendOrientation.HORIZONTAL
                 legend.setDrawInside(false)
-                
+
                 val marker = ChartMarkerView(context, R.layout.chart_tooltip, data.prices)
                 marker.chartView = this
                 this.marker = marker
@@ -219,4 +222,22 @@ class ChartMarkerView(
     override fun getOffset(): MPPointF {
         return MPPointF((-(width / 2)).toFloat(), (-height).toFloat())
     }
+}
+
+/** Recorta los precios según el rango seleccionado (1d, 1w, 1m, 1y, Todo). */
+private fun filterByRange(
+    data: CurrencyPairChartData,
+    range: String
+): CurrencyPairChartData {
+    if (data.prices.isEmpty()) return data
+    val last = data.prices.maxOf { it.timestamp }
+    val cutoff = when (range) {
+        "1d" -> last.minusDays(1)
+        "1w" -> last.minusWeeks(1)
+        "1m" -> last.minusMonths(1)
+        "1y" -> last.minusYears(1)
+        else -> return data // "Todo" = sin recorte
+    }
+    val filtered = data.prices.filter { !it.timestamp.isBefore(cutoff) }
+    return data.copy(prices = if (filtered.isEmpty()) data.prices else filtered)
 }

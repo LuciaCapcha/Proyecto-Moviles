@@ -992,31 +992,26 @@ object ExchangeRepository {
         val netReceived: Double
     )
 
-    /** Carga todos los pares activos con sus precios reales de Supabase */
+    /** Carga todos los pares — OPTIMIZADO: 3 llamadas en total, no una por par */
     suspend fun getAllPairs(): Result<List<PairUi>> {
         return runCatching {
             val monedas = api.getMonedas().associateBy { it.monedaId }
             val pares   = api.getAllParesMoneda()
 
+            // Traemos TODAS las ofertas activas en UNA sola llamada y agrupamos en memoria
+            val offersByPair = runCatching { api.getAllOfertasActivas() }
+                .getOrElse { emptyList() }
+                .filter { isActiveStatus(it.estado) }
+                .groupBy { it.parMonedaId }
+
             pares.mapNotNull { par ->
                 val from = monedas[par.monedaOrigenId]  ?: return@mapNotNull null
                 val to   = monedas[par.monedaDestinoId] ?: return@mapNotNull null
 
-                val offers = runCatching {
-                    api.getOfertasVentaByPair("eq.${par.parMonedaId}")
-                        .filter { isActiveStatus(it.estado) }
-                }.getOrElse { emptyList() }
-
-                // También intentamos historial para tener precio de compra real
-                val historico = runCatching {
-                    api.getHistoricoByPar("eq.${par.parMonedaId}", limit = 1)
-                }.getOrElse { emptyList() }
-
-                val bestSell = offers.minByOrNull { it.precioUnitario }?.precioUnitario
-                    ?: historico.firstOrNull()?.menorPrecioVenta
-                val bestBuy  = historico.firstOrNull()?.mayorPrecioCompra
-                    ?: bestSell?.let { it * 0.99 }
-                val volume   = offers.sumOf { it.cantidadPendiente }
+                val parOffers = offersByPair[par.parMonedaId].orEmpty()
+                val bestSell = parOffers.minByOrNull { it.precioUnitario }?.precioUnitario
+                val bestBuy  = bestSell?.let { it * 0.99 }
+                val volume   = parOffers.sumOf { it.cantidadPendiente }
                 val margin   = if (bestBuy != null && bestSell != null) bestSell - bestBuy else null
 
                 PairUi(
@@ -1032,6 +1027,15 @@ object ExchangeRepository {
                 )
             }
         }
+    }
+
+    /** Devuelve los parMonedaId con los que el usuario operó recientemente (más reciente primero). */
+    suspend fun getRecentPairIds(usuarioId: Int): List<Int> {
+        return runCatching {
+            api.getHistorialByUsuario("eq.$usuarioId")
+                .mapNotNull { it.parMonedaId }
+                .distinct()
+        }.getOrElse { emptyList() }
     }
 
     /** Historial de precios real de un par para el gráfico */
@@ -1140,6 +1144,84 @@ object ExchangeRepository {
                 "fechaenvio"        to null,
                 "referenciatipo"    to "ofertasventa",
                 "referenciaid"      to oferta.ofertaVentaId
+            ))
+
+            AppSession.notifyWalletChanged()
+        }
+    }
+
+    /** Genera una ORDEN DE COMPRA del usuario */
+    suspend fun createBuyOrder(
+        usuarioId: Int,
+        pairCode: String,
+        amount: Double,
+        price: Double
+    ): Result<Unit> {
+        return runCatching {
+            require(amount > 0.0) { "Cantidad inválida" }
+            require(price > 0.0)  { "Precio inválido" }
+
+            val (fromCode, toCode) = parsePairCode(pairCode)
+            val from = getCurrencyByCode(fromCode)
+            val to   = getCurrencyByCode(toCode)
+            val pair = getPairOrThrow(from.monedaId, to.monedaId)
+
+            val total = amount * price
+
+            val available = getAvailableBalance(usuarioId, from.monedaId)
+            require(available >= total) { "Saldo insuficiente" }
+
+            val now = nowIso()
+            val (before, after) = subtractBalance(usuarioId, from.monedaId, total)
+
+            val orden = api.insertOrdenCompra(
+                mapOf(
+                    "usuarioid"          to usuarioId,
+                    "parmonedaid"        to pair.parMonedaId,
+                    "cantidadoriginal"   to amount,
+                    "cantidadobtenida"   to 0.0,
+                    "cantidadpendiente"  to amount,
+                    "preciounitario"     to price,
+                    "totalcomprometido"  to total,
+                    "totalejecutado"     to 0.0,
+                    "estado"             to "Activa",
+                    "fechacreacion"      to now,
+                    "fechaactualizacion" to now,
+                    "fechacancelacion"   to null
+                )
+            ).first()
+
+            insertWalletMovement(
+                usuarioId, from.monedaId, "OrdenCompra", total,
+                before, after, "ordenescompra", orden.ordenCompraId, now
+            )
+
+            api.insertHistorial(mapOf(
+                "usuarioid"       to usuarioId,
+                "tipooperacion"   to "Orden de compra",
+                "referenciaid"    to orden.ordenCompraId,
+                "parmonedaid"     to pair.parMonedaId,
+                "monedaid"        to null,
+                "fechahora"       to now,
+                "estado"          to "Activa",
+                "metodoejecucion" to "Normal"
+            ))
+
+            val correo = api.getUsuarioById("eq.$usuarioId").firstOrNull()
+                ?.correoElectronico ?: "correo@pendiente.com"
+            api.insertNotificacionCorreo(mapOf(
+                "usuarioid"          to usuarioId,
+                "tiponotificacionid" to null,
+                "correodestino"      to correo,
+                "tipoevento"         to "ORDEN_CREADA",
+                "asunto"             to "Tu orden de compra fue registrada",
+                "cuerpo"             to "Orden de %.4f %s a precio %.4f %s creada correctamente."
+                    .format(amount, from.codigoIso.trim(), price, to.codigoIso.trim()),
+                "estadoenvio"        to "Pendiente",
+                "fechacreacion"      to now,
+                "fechaenvio"         to null,
+                "referenciatipo"     to "ordenescompra",
+                "referenciaid"       to orden.ordenCompraId
             ))
 
             AppSession.notifyWalletChanged()
