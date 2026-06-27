@@ -84,7 +84,6 @@ dependencies {
     implementation("androidx.fragment:fragment-ktx:1.5.7")
     implementation("com.jakewharton.retrofit:retrofit2-kotlin-coroutines-adapter:0.9.2")
 // O si usas retrofit 2.9+, ya viene incluido con:
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

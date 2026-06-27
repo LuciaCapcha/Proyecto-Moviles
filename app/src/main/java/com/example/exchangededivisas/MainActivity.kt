@@ -6,10 +6,12 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.example.exchangededivisas.presentation.navigation.AppNavGraph
 import com.example.exchangededivisas.ui.theme.ExchangedeDivisasTheme
+import com.example.exchangededivisas.ui.theme.ThemeState
 
 class MainActivity : ComponentActivity() {
 
@@ -17,19 +19,21 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            android.util.Log.d("NOTIF", "Permiso de notificaciones concedido")
+            android.util.Log.d("NOTIF", "Permiso concedido")
         } else {
-            android.util.Log.d("NOTIF", "Permiso de notificaciones denegado")
+            android.util.Log.d("NOTIF", "Permiso denegado")
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
+        enableEdgeToEdge()
         pedirPermisoNotificaciones()
-
         setContent {
-            ExchangedeDivisasTheme {
+            ExchangedeDivisasTheme(
+                darkTheme = ThemeState.isDarkMode,
+                dynamicColor = false
+            ) {
                 AppNavGraph()
             }
         }
