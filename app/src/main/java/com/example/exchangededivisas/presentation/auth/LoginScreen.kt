@@ -63,6 +63,9 @@ fun LoginScreen(navController: NavController) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
 
+    // El botón se habilita solo si ambos campos tienen texto (HU-002)
+    val isFormValid = usernameOrEmail.isNotBlank() && password.isNotBlank()
+
     val darkBackground = Brush.verticalGradient(
         colors = listOf(
             Color(0xFF111032),
@@ -221,7 +224,7 @@ fun LoginScreen(navController: NavController) {
                         isLoading = false
                     }
                 },
-                enabled = !isLoading,
+                enabled = isFormValid && !isLoading,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .fillMaxWidth()

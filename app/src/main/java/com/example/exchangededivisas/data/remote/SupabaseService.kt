@@ -273,4 +273,18 @@ interface SupabaseService {
         @Query("select") select: String = "ejecucionid,totaloperacion"
     ): List<Map<String, Any?>>
 
+    // ---- registro
+    @GET("roles")
+    suspend fun getRoles(): List<Map<String, Any?>>
+
+    @GET("paises")
+    suspend fun getPaises(): List<Map<String, Any?>>
+
+    @POST("usuarios")
+    @Headers("Prefer: return=representation")
+    suspend fun insertUsuario(
+        @Body body: Map<String, @JvmSuppressWildcards Any?>
+    ): List<UsuarioDto>
+
 }
+
