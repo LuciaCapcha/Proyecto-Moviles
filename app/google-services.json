@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "185585501168",
+    "project_id": "exchangededivisas-64b22",
+    "storage_bucket": "exchangededivisas-64b22.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:185585501168:android:d60bef8fdf120b6a6b5335",
+        "android_client_info": {
+          "package_name": "com.example.exchangededivisas"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA3zlKXnOdEVJTjmPgz-v7aQlTEIgiqlg4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
