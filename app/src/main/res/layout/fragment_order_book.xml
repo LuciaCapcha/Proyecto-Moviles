@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Libro de Órdenes"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="15dp" />
+
+    <TextView
+        android:id="@+id/tv_currency_pair"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="USD/PEN"
+        android:textSize="18sp"
+        android:textColor="#2196F3"
+        android:layout_marginBottom="20dp"
+        android:gravity="center" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:spacing="10dp">
+
+        <!-- OFERTAS DE VENTA (Izquierda) -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Ofertas de Venta"
+                android:textStyle="bold"
+                android:textColor="#F44336"
+                android:layout_marginBottom="10dp" />
+
+            <ListView
+                android:id="@+id/lv_sell_offers"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:divider="@android:color/darker_gray"
+                android:dividerHeight="1dp" />
+
+            <TextView
+                android:id="@+id/tv_no_sell_offers"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:text="Sin ofertas disponibles"
+                android:gravity="center"
+                android:textColor="#999999"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+        <!-- Separador -->
+        <View
+            android:layout_width="2dp"
+            android:layout_height="match_parent"
+            android:background="#CCCCCC"
+            android:layout_marginHorizontal="5dp" />
+
+        <!-- ÓRDENES DE COMPRA (Derecha) -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Órdenes de Compra"
+                android:textStyle="bold"
+                android:textColor="#4CAF50"
+                android:layout_marginBottom="10dp" />
+
+            <ListView
+                android:id="@+id/lv_buy_orders"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:divider="@android:color/darker_gray"
+                android:dividerHeight="1dp" />
+
+            <TextView
+                android:id="@+id/tv_no_buy_orders"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:text="Sin órdenes disponibles"
+                android:gravity="center"
+                android:textColor="#999999"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</LinearLayout>

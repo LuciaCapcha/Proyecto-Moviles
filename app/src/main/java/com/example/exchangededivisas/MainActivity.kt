@@ -18,6 +18,7 @@ class MainActivity : ComponentActivity() {
                 dynamicColor = false
             ) {
                 AppNavGraph()
+
             }
         }
     }
