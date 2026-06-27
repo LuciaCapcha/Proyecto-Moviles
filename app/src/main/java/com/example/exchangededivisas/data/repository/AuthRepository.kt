@@ -117,4 +117,57 @@ object AuthRepository {
             )
         }
     }
+
+    // crear cuenta
+    suspend fun register(
+        nombreUsuario: String,
+        correo: String,
+        password: String
+    ): Result<CurrentUser> = runCatching {
+        val user = nombreUsuario.trim()
+        val email = correo.trim()
+        val pass = password.trim()
+
+        // El correo y el usuario no deben estar repetidos
+        if (api.getUsuarioByCorreoElectronico("eq.$email").isNotEmpty())
+            throw IllegalArgumentException("El correo ya está registrado")
+        if (api.getUsuarioByNombreUsuario("eq.$user").isNotEmpty())
+            throw IllegalArgumentException("El nombre de usuario ya existe")
+
+        // Buscamos el rol "Usuario" y un país por defecto
+
+        val rolId = (api.getRoles().firstOrNull { it["nombre"] == "USU" }
+            ?: api.getRoles().firstOrNull())
+            ?.get("rolid")?.let { (it as Number).toInt() }
+            ?: throw IllegalStateException("No hay roles en la base de datos")
+
+        val paisId = api.getPaises().firstOrNull()
+            ?.get("paisid")?.let { (it as Number).toInt() }
+            ?: throw IllegalStateException("No hay países en la base de datos")
+
+        // Creamos el usuario en la tabla
+        val nuevo = api.insertUsuario(
+            mapOf(
+                "rolid" to rolId,
+                "paisid" to paisId,
+                "nombreusuario" to user,
+                "correoelectronico" to email,
+                "passwordhash" to pass,
+                "estado" to "Activo"
+            )
+        ).firstOrNull() ?: throw IllegalStateException("No se pudo crear el usuario")
+
+        // Le creamos su billetera
+        runCatching { api.insertBilletera(mapOf("usuarioid" to nuevo.usuarioId)) }
+
+        val current = CurrentUser(
+            usuarioId = nuevo.usuarioId,
+            nombreUsuario = nuevo.nombreUsuario ?: user,
+            correoElectronico = nuevo.correoElectronico ?: email,
+            rolId = nuevo.rolId ?: rolId,
+            estado = nuevo.estado ?: "Activo"
+        )
+        AppSession.setUser(current)
+        current
+    }
 }
