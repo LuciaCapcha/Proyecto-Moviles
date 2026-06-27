@@ -126,8 +126,8 @@ interface SupabaseService {
 
     @GET("paresmoneda")
     suspend fun getParMoneda(
-        @Query("monedaorigenid") monedaOrigenId: String,
-        @Query("monedadestinoid") monedaDestinoId: String,
+        @Query("metalorigenid") monedaOrigenId: String,
+        @Query("mercadodestinoide") monedaDestinoId: String,
         @Query("activo") activo: String = "eq.true",
         @Query("limit") limit: Int = 1
     ): List<ParMonedaDto>
