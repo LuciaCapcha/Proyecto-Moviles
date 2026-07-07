@@ -9,12 +9,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -24,6 +27,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -33,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -47,7 +52,18 @@ import com.example.exchangededivisas.data.repository.PaymentMethodUi
 import com.example.exchangededivisas.data.repository.WalletCurrencyUi
 import com.example.exchangededivisas.data.session.AppSession
 import kotlinx.coroutines.launch
-import androidx.compose.foundation.layout.heightIn
+
+data class DepositInputUi(
+    val currencyCode: String,
+    val amountText: String
+)
+
+private data class DepositSummaryLine(
+    val currencyCode: String,
+    val amount: Double,
+    val commission: Double,
+    val totalToPay: Double
+)
 
 @Composable
 fun DepositScreen() {
@@ -59,13 +75,13 @@ fun DepositScreen() {
 
     var currencies by remember { mutableStateOf<List<WalletCurrencyUi>>(emptyList()) }
     var methods by remember { mutableStateOf<List<PaymentMethodUi>>(emptyList()) }
-
-    var selectedCurrencyCode by remember { mutableStateOf("PEN") }
     var selectedMethod by remember { mutableStateOf<PaymentMethodUi?>(null) }
-    var amountText by remember { mutableStateOf("") }
+
+    val deposits = remember { mutableStateListOf(DepositInputUi("PEN", "")) }
 
     var methodMenuExpanded by remember { mutableStateOf(false) }
-    var showCurrencyDialog by remember { mutableStateOf(false) }
+    var currencyDialogIndex by remember { mutableStateOf<Int?>(null) }
+    var showConfirmDialog by remember { mutableStateOf(false) }
 
     var screenError by remember { mutableStateOf<String?>(null) }
     var dialogMessage by remember { mutableStateOf<String?>(null) }
@@ -86,13 +102,8 @@ fun DepositScreen() {
         isInitialLoading = true
         screenError = null
 
-        val currenciesResult = runCatching {
-            ExchangeRepository.getCurrencies()
-        }
-
-        val methodsResult = runCatching {
-            ExchangeRepository.getPaymentMethods()
-        }
+        val currenciesResult = runCatching { ExchangeRepository.getCurrencies() }
+        val methodsResult = runCatching { ExchangeRepository.getPaymentMethods() }
 
         currencies = currenciesResult.getOrElse {
             screenError = "No se pudieron cargar monedas desde Supabase. Se usarán datos temporales."
@@ -108,37 +119,23 @@ fun DepositScreen() {
             fallbackMethods
         }
 
-        selectedCurrencyCode = when {
-            currencies.any { it.code == "PEN" } -> "PEN"
-            currencies.isNotEmpty() -> currencies.first().code
-            else -> "PEN"
-        }
+        val defaultCurrency = defaultCurrencyCode(currencies)
+        deposits.clear()
+        deposits.add(DepositInputUi(defaultCurrency, ""))
 
-        selectedMethod = methods.firstOrNull {
-            it.nombre.equals("Yape", ignoreCase = true)
-        } ?: methods.firstOrNull()
+        selectedMethod = methods.firstOrNull { it.nombre.equals("Yape", ignoreCase = true) }
+            ?: methods.firstOrNull()
 
         isInitialLoading = false
     }
 
-    val amount = amountText.toDoubleOrNull() ?: 0.0
-    val isInvalidAmount = amountText.isNotBlank() && amount <= 0.0
-
     val method = selectedMethod
-
-    val commission = if (method != null && amount > 0.0) {
-        amount * (method.comisionPorcentaje / 100.0) + method.comisionFija
-    } else {
-        0.0
+    val summaryLines = buildDepositSummary(deposits, method)
+    val hasInvalidAmounts = deposits.any {
+        it.amountText.isNotBlank() && ((it.amountText.toDoubleOrNull() ?: 0.0) <= 0.0)
     }
-
-    val totalToPay = amount + commission
-
-    val canConfirm = !isInitialLoading &&
-            !isSaving &&
-            method != null &&
-            selectedCurrencyCode.isNotBlank() &&
-            amount > 0.0
+    val allAmountsValid = deposits.isNotEmpty() && deposits.all { (it.amountText.toDoubleOrNull() ?: 0.0) > 0.0 }
+    val canConfirm = !isInitialLoading && !isSaving && method != null && allAmountsValid
 
     Column(
         modifier = Modifier
@@ -153,54 +150,28 @@ fun DepositScreen() {
         )
 
         Text(
-            text = "Registra depósitos en Supabase y actualiza tu billetera.",
+            text = "Puedes depositar una o varias monedas en una misma operación.",
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Spacer(modifier = Modifier.height(18.dp))
 
         if (isInitialLoading) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator()
-
-                Text(
-                    text = "Cargando datos...",
-                    modifier = Modifier.padding(start = 12.dp)
-                )
+                Text(text = "Cargando datos...", modifier = Modifier.padding(start = 12.dp))
             }
-
             Spacer(modifier = Modifier.height(18.dp))
         }
 
-        if (screenError != null) {
+        screenError?.let {
             Text(
-                text = screenError!!,
+                text = it,
                 color = MaterialTheme.colorScheme.error,
                 fontWeight = FontWeight.Medium
             )
-
             Spacer(modifier = Modifier.height(14.dp))
         }
-
-        Text(
-            text = "Moneda",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        OutlinedButton(
-            onClick = { showCurrencyDialog = true },
-            enabled = currencies.isNotEmpty() && !isSaving,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(selectedCurrencyCode)
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
 
         Text(
             text = "Método de pago",
@@ -210,18 +181,13 @@ fun DepositScreen() {
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        Box(
-            modifier = Modifier.fillMaxWidth()
-        ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(
                 onClick = { methodMenuExpanded = true },
                 enabled = methods.isNotEmpty() && !isSaving,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = method?.let { formatPaymentMethod(it) }
-                        ?: "Seleccionar método de pago"
-                )
+                Text(method?.let { formatPaymentMethod(it) } ?: "Seleccionar método de pago")
             }
 
             DropdownMenu(
@@ -233,11 +199,7 @@ fun DepositScreen() {
                     DropdownMenuItem(
                         text = {
                             Column {
-                                Text(
-                                    text = item.nombre,
-                                    fontWeight = FontWeight.Bold
-                                )
-
+                                Text(text = item.nombre, fontWeight = FontWeight.Bold)
                                 Text(
                                     text = "Comisión %.2f%% + %.2f".format(
                                         item.comisionPorcentaje,
@@ -258,122 +220,99 @@ fun DepositScreen() {
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        OutlinedTextField(
-            value = amountText,
-            onValueChange = {
-                amountText = it
-                screenError = null
-            },
-            label = { Text("Monto") },
-            singleLine = true,
-            isError = isInvalidAmount,
-            supportingText = {
-                if (isInvalidAmount) {
-                    Text("Monto inválido")
+        Text(
+            text = "Monedas a depositar",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        deposits.forEachIndexed { index, item ->
+            DepositCurrencyRow(
+                item = item,
+                canDelete = deposits.size > 1 && !isSaving,
+                onSelectCurrency = { currencyDialogIndex = index },
+                onAmountChange = { newAmount -> deposits[index] = item.copy(amountText = newAmount) },
+                onDelete = { deposits.removeAt(index) }
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+        }
+
+        OutlinedButton(
+            onClick = {
+                nextAvailableDepositCurrencyCode(currencies, deposits.map { it.currencyCode })?.let { code ->
+                    deposits.add(DepositInputUi(code, ""))
                 }
             },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            enabled = currencies.any { currency -> deposits.none { it.currencyCode == currency.code } } && !isSaving,
             modifier = Modifier.fillMaxWidth()
-        )
+        ) {
+            Icon(Icons.Default.Add, contentDescription = null)
+            Text(text = "Agregar otra moneda", modifier = Modifier.padding(start = 8.dp))
+        }
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(3.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
-                Text(
-                    text = "Resumen",
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.titleMedium
-                )
+        SummaryCard(
+            title = "Resumen preliminar",
+            methodName = method?.nombre ?: "-",
+            lines = summaryLines,
+            totalLabel = "Total a pagar por moneda"
+        )
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                SummaryRow("Moneda", selectedCurrencyCode)
-                SummaryRow("Monto", "%.2f".format(amount))
-                SummaryRow("Método", method?.nombre ?: "-")
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 10.dp)
-                )
-
-                SummaryRow("Comisión", "%.2f".format(commission))
-                SummaryRow("Total a pagar", "%.2f".format(totalToPay))
-            }
+        if (hasInvalidAmounts) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "Monto inválido",
+                color = MaterialTheme.colorScheme.error,
+                fontWeight = FontWeight.Bold
+            )
         }
 
         Spacer(modifier = Modifier.height(20.dp))
 
         Button(
-            onClick = {
-                scope.launch {
-                    isSaving = true
-                    screenError = null
-
-                    val selected = selectedMethod
-
-                    if (selected == null) {
-                        screenError = "Seleccione un método de pago."
-                        isSaving = false
-                        return@launch
-                    }
-
-                    ExchangeRepository.makeDeposit(
-                        usuarioId = currentUser.usuarioId,
-                        currencyCode = selectedCurrencyCode,
-                        paymentMethodName = selected.nombre,
-                        amount = amount
-                    ).onSuccess {
-                        dialogMessage = "Depósito registrado correctamente. La billetera fue actualizada."
-                        amountText = ""
-                    }.onFailure {
-                        screenError = it.message ?: "No se pudo registrar el depósito."
-                    }
-
-                    isSaving = false
-                }
-            },
+            onClick = { showConfirmDialog = true },
             enabled = canConfirm,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(54.dp)
         ) {
-            Icon(
-                imageVector = Icons.Default.CheckCircle,
-                contentDescription = null
-            )
-
+            Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null)
             Text(
-                text = if (isSaving) "Registrando..." else "Confirmar depósito",
+                text = if (isSaving) "Registrando..." else "Continuar",
                 modifier = Modifier.padding(start = 8.dp)
             )
         }
     }
 
-    if (showCurrencyDialog) {
+    val selectedCurrencyIndex = currencyDialogIndex
+    if (selectedCurrencyIndex != null) {
         AlertDialog(
-            onDismissRequest = { showCurrencyDialog = false },
-            title = {
-                Text("Seleccionar moneda")
-            },
+            onDismissRequest = { currencyDialogIndex = null },
+            title = { Text("Seleccionar moneda") },
             text = {
                 Column(
                     modifier = Modifier
                         .heightIn(max = 420.dp)
                         .verticalScroll(rememberScrollState())
                 ) {
-                    currencies.forEach { currency ->
+                    val usedByOtherRows = deposits.mapIndexedNotNull { index, item ->
+                        if (index == selectedCurrencyIndex) null else item.currencyCode
+                    }.toSet()
+
+                    currencies
+                        .filter { it.code !in usedByOtherRows }
+                        .forEach { currency ->
                         Text(
                             text = "${currency.code} - ${currency.name}",
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    selectedCurrencyCode = currency.code
-                                    showCurrencyDialog = false
+                                    val current = deposits[selectedCurrencyIndex]
+                                    deposits[selectedCurrencyIndex] = current.copy(currencyCode = currency.code)
+                                    currencyDialogIndex = null
                                 }
                                 .padding(vertical = 10.dp)
                         )
@@ -381,28 +320,87 @@ fun DepositScreen() {
                 }
             },
             confirmButton = {
-                TextButton(
-                    onClick = { showCurrencyDialog = false }
-                ) {
+                TextButton(onClick = { currencyDialogIndex = null }) {
                     Text("Cerrar")
                 }
             }
         )
     }
 
-    if (dialogMessage != null) {
+    if (showConfirmDialog) {
         AlertDialog(
-            onDismissRequest = { dialogMessage = null },
-            title = {
-                Text("Depósito confirmado")
-            },
+            onDismissRequest = { showConfirmDialog = false },
+            title = { Text("Confirmar depósito") },
             text = {
-                Text(dialogMessage!!)
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 430.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text("Revise el resumen antes de confirmar:")
+                    Spacer(modifier = Modifier.height(10.dp))
+                    SummaryContent(
+                        methodName = method?.nombre ?: "-",
+                        lines = summaryLines,
+                        totalLabel = "Total a pagar por moneda"
+                    )
+                }
             },
             confirmButton = {
                 TextButton(
-                    onClick = { dialogMessage = null }
+                    onClick = {
+                        showConfirmDialog = false
+                        scope.launch {
+                            isSaving = true
+                            screenError = null
+
+                            val selected = selectedMethod
+                            if (selected == null) {
+                                screenError = "Seleccione un método de pago."
+                                isSaving = false
+                                return@launch
+                            }
+
+                            val results = deposits.map { input ->
+                                ExchangeRepository.makeDeposit(
+                                    usuarioId = currentUser.usuarioId,
+                                    currencyCode = input.currencyCode,
+                                    paymentMethodName = selected.nombre,
+                                    amount = input.amountText.toDoubleOrNull() ?: 0.0
+                                )
+                            }
+
+                            val firstError = results.firstOrNull { it.isFailure }?.exceptionOrNull()
+                            if (firstError != null) {
+                                screenError = firstError.message ?: "No se pudo registrar el depósito."
+                            } else {
+                                dialogMessage = "Depósito registrado correctamente. Se generó el voucher pendiente de envío al correo registrado."
+                                deposits.clear()
+                                deposits.add(DepositInputUi(defaultCurrencyCode(currencies), ""))
+                            }
+
+                            isSaving = false
+                        }
+                    }
                 ) {
+                    Text("Confirmar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirmDialog = false }) {
+                    Text("Volver")
+                }
+            }
+        )
+    }
+
+    dialogMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { dialogMessage = null },
+            title = { Text("Depósito confirmado") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { dialogMessage = null }) {
                     Text("Aceptar")
                 }
             }
@@ -411,26 +409,143 @@ fun DepositScreen() {
 }
 
 @Composable
-private fun SummaryRow(
-    label: String,
-    value: String
+private fun DepositCurrencyRow(
+    item: DepositInputUi,
+    canDelete: Boolean,
+    onSelectCurrency: () -> Unit,
+    onAmountChange: (String) -> Unit,
+    onDelete: () -> Unit
 ) {
+    val amount = item.amountText.toDoubleOrNull() ?: 0.0
+    val invalid = item.amountText.isNotBlank() && amount <= 0.0
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = onSelectCurrency,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(item.currencyCode)
+                }
+
+                IconButton(
+                    onClick = onDelete,
+                    enabled = canDelete
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = "Eliminar moneda")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = item.amountText,
+                onValueChange = onAmountChange,
+                label = { Text("Monto") },
+                singleLine = true,
+                isError = invalid,
+                supportingText = {
+                    if (invalid) Text("Monto inválido")
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+private fun SummaryCard(
+    title: String,
+    methodName: String,
+    lines: List<DepositSummaryLine>,
+    totalLabel: String
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(3.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = title,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            SummaryContent(methodName, lines, totalLabel)
+        }
+    }
+}
+
+@Composable
+private fun SummaryContent(
+    methodName: String,
+    lines: List<DepositSummaryLine>,
+    totalLabel: String
+) {
+    SummaryRow("Método", methodName)
+    HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
+    lines.forEach { line ->
+        Text(line.currencyCode, fontWeight = FontWeight.Bold)
+        SummaryRow("Monto", "%.2f %s".format(line.amount, line.currencyCode))
+        SummaryRow("Comisión", "%.2f %s".format(line.commission, line.currencyCode))
+        SummaryRow(totalLabel, "%.2f %s".format(line.totalToPay, line.currencyCode))
+        Spacer(modifier = Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun SummaryRow(label: String, value: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(
-            text = label,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Text(text = label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(text = value, fontWeight = FontWeight.Medium)
+    }
+}
 
-        Text(
-            text = value,
-            fontWeight = FontWeight.Medium
+private fun buildDepositSummary(
+    deposits: List<DepositInputUi>,
+    method: PaymentMethodUi?
+): List<DepositSummaryLine> {
+    return deposits.map { item ->
+        val amount = item.amountText.toDoubleOrNull() ?: 0.0
+        val commission = if (method != null && amount > 0.0) {
+            amount * (method.comisionPorcentaje / 100.0) + method.comisionFija
+        } else {
+            0.0
+        }
+        DepositSummaryLine(
+            currencyCode = item.currencyCode,
+            amount = amount,
+            commission = commission,
+            totalToPay = amount + commission
         )
     }
+}
+
+private fun defaultCurrencyCode(currencies: List<WalletCurrencyUi>): String {
+    return nextAvailableDepositCurrencyCode(currencies, emptyList()) ?: "PEN"
+}
+
+private fun nextAvailableDepositCurrencyCode(
+    currencies: List<WalletCurrencyUi>,
+    usedCodes: List<String>
+): String? {
+    val used = usedCodes.toSet()
+    return currencies.firstOrNull { it.code == "PEN" && it.code !in used }?.code
+        ?: currencies.firstOrNull { it.code !in used }?.code
 }
 
 private fun formatPaymentMethod(method: PaymentMethodUi): String {

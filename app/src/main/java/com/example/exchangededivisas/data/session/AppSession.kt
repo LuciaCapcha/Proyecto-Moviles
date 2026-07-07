@@ -14,15 +14,15 @@ data class CurrentUser(
 
 object AppSession {
 
-    private val _currentUser = MutableStateFlow(
-        CurrentUser(
-            usuarioId = 1,
-            nombreUsuario = "usuario_demo",
-            correoElectronico = "demo@ezchange.com",
-            rolId = 1,
-            estado = "Activo"
-        )
+    private val emptyUser = CurrentUser(
+        usuarioId = 0,
+        nombreUsuario = "",
+        correoElectronico = "",
+        rolId = 0,
+        estado = "Sin sesión"
     )
+
+    private val _currentUser = MutableStateFlow(emptyUser)
 
     val currentUser: StateFlow<CurrentUser> = _currentUser.asStateFlow()
 
@@ -35,13 +35,7 @@ object AppSession {
     }
 
     fun logout() {
-        _currentUser.value = CurrentUser(
-            usuarioId = 1,
-            nombreUsuario = "usuario_demo",
-            correoElectronico = "demo@ezchange.com",
-            rolId = 1,
-            estado = "Activo"
-        )
+        _currentUser.value = emptyUser
         notifyWalletChanged()
     }
 

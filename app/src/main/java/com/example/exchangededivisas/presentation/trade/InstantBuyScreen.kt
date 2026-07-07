@@ -33,17 +33,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavController
 import com.example.exchangededivisas.data.repository.ExchangeRepository
 import com.example.exchangededivisas.data.repository.InstantBuyPreview
 import com.example.exchangededivisas.data.session.AppSession
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.widget.Toast
 
 @Composable
-fun InstantBuyScreen(code: String = "PEN_USD") {
+fun InstantBuyScreen(navController: NavController? = null, code: String = "PEN_USD") {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val currentUser by AppSession.currentUser.collectAsState()
 
     var amountText by remember { mutableStateOf("") }
@@ -52,17 +57,20 @@ fun InstantBuyScreen(code: String = "PEN_USD") {
     var isLoadingPreview by remember { mutableStateOf(false) }
     var isExecuting by remember { mutableStateOf(false) }
     var dialogMessage by remember { mutableStateOf<String?>(null) }
+    var lastRefreshText by remember { mutableStateOf("Sin cálculo") }
 
     val amount = amountText.toDoubleOrNull() ?: 0.0
     val isValueInvalid = amountText.isNotBlank() && amount <= 0.0
 
-    LaunchedEffect(code, amountText, currentUser.usuarioId) {
-        preview = null
+    suspend fun refreshPreview(showLoading: Boolean) {
+        if (amount <= 0.0) {
+            preview = null
+            lastRefreshText = "Sin cálculo"
+            return
+        }
+
+        if (showLoading) isLoadingPreview = true
         error = null
-
-        if (amount <= 0.0) return@LaunchedEffect
-
-        isLoadingPreview = true
 
         ExchangeRepository.previewInstantBuy(
             usuarioId = currentUser.usuarioId,
@@ -70,11 +78,30 @@ fun InstantBuyScreen(code: String = "PEN_USD") {
             amount = amount
         ).onSuccess {
             preview = it
+            lastRefreshText = "Actualizado automáticamente"
         }.onFailure {
+            preview = null
             error = it.message ?: "No se pudo calcular la compra inmediata."
+            lastRefreshText = "No actualizado"
         }
 
-        isLoadingPreview = false
+        if (showLoading) isLoadingPreview = false
+    }
+
+    LaunchedEffect(code, amountText, currentUser.usuarioId) {
+        preview = null
+        error = null
+
+        if (amount <= 0.0) return@LaunchedEffect
+
+        refreshPreview(showLoading = true)
+
+        while (true) {
+            delay(2500)
+            if (!isExecuting) {
+                refreshPreview(showLoading = false)
+            }
+        }
     }
 
     val p = preview
@@ -97,7 +124,7 @@ fun InstantBuyScreen(code: String = "PEN_USD") {
         )
 
         Text(
-            text = "Compra contra las mejores ofertas de venta disponibles en Supabase.",
+            text = "Compra contra las mejores ofertas de venta disponibles. El cálculo se refresca solo para evitar choques entre operaciones.",
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
@@ -115,6 +142,12 @@ fun InstantBuyScreen(code: String = "PEN_USD") {
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = lastRefreshText,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 if (p != null) {
@@ -217,12 +250,36 @@ fun InstantBuyScreen(code: String = "PEN_USD") {
                     isExecuting = true
                     error = null
 
+                    val freshPreview = ExchangeRepository.previewInstantBuy(
+                        usuarioId = currentUser.usuarioId,
+                        pairCode = code,
+                        amount = amount
+                    ).getOrElse {
+                        error = it.message ?: "No se pudo recalcular la compra inmediata."
+                        isExecuting = false
+                        return@launch
+                    }
+
+                    preview = freshPreview
+
+                    if (!freshPreview.hasLiquidity) {
+                        error = "Liquidez insuficiente"
+                        isExecuting = false
+                        return@launch
+                    }
+
+                    if (!freshPreview.hasEnoughBalance) {
+                        error = "Saldo insuficiente"
+                        isExecuting = false
+                        return@launch
+                    }
+
                     ExchangeRepository.executeInstantBuy(
                         usuarioId = currentUser.usuarioId,
                         pairCode = code,
                         amount = amount
                     ).onSuccess { receipt ->
-                        dialogMessage = "Compra confirmada. Compraste %.2f %s por %.2f %s."
+                        val message = "Compra confirmada. Compraste %.2f %s por %.2f %s."
                             .format(
                                 receipt.boughtAmount,
                                 receipt.toCurrency,
@@ -231,8 +288,16 @@ fun InstantBuyScreen(code: String = "PEN_USD") {
                             )
                         amountText = ""
                         preview = null
+
+                        if (navController != null) {
+                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                            navController.popBackStack()
+                        } else {
+                            dialogMessage = message
+                        }
                     }.onFailure {
-                        error = it.message ?: "No se pudo ejecutar la compra inmediata."
+                        error = it.message ?: "No se pudo ejecutar la compra inmediata. El libro pudo cambiar antes de confirmar."
+                        refreshPreview(showLoading = false)
                     }
 
                     isExecuting = false

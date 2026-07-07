@@ -17,7 +17,9 @@ sealed class HomeUiState {
         val userMostActive: CurrencyPairChartData?,
         val isLoggedIn: Boolean,
         val userName: String,
-        val isLoadingCharts: Boolean = false
+        val isLoadingCharts: Boolean = false,
+        val isRestricted: Boolean = false,
+        val restrictionReason: String? = null
     ) : HomeUiState()
     data class Error(val message: String) : HomeUiState()
 }
@@ -42,7 +44,7 @@ class HomeViewModel : ViewModel() {
     fun loadDashboardData() {
         viewModelScope.launch {
             val currentUser = AppSession.currentUser.value
-            val isLoggedIn = currentUser.usuarioId != 0 && currentUser.estado == "Activo"
+            val isLoggedIn = currentUser.usuarioId != 0
 
             // Emitir un estado de éxito parcial inmediatamente para mostrar el saludo
             if (_uiState.value !is HomeUiState.Success) {
@@ -51,7 +53,8 @@ class HomeViewModel : ViewModel() {
                     userMostActive = null,
                     isLoggedIn = isLoggedIn,
                     userName = currentUser.nombreUsuario,
-                    isLoadingCharts = true
+                    isLoadingCharts = true,
+                    isRestricted = currentUser.estado.equals("Restringido", ignoreCase = true)
                 )
             }
 
@@ -63,7 +66,9 @@ class HomeViewModel : ViewModel() {
                     userMostActive = homeData.userMostActive,
                     isLoggedIn = isLoggedIn,
                     userName = currentUser.nombreUsuario,
-                    isLoadingCharts = false
+                    isLoadingCharts = false,
+                    isRestricted = homeData.isRestricted,
+                    restrictionReason = homeData.restrictionReason
                 )
             } catch (e: Exception) {
                 _uiState.value = HomeUiState.Error(

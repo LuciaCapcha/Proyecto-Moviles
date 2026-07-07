@@ -35,7 +35,23 @@ fun AppNavGraph() {
         composable("register") { RegisterScreen(navController) }
 
         composable("admin_dashboard") {
-            AdminDashboardScreen(navController = navController, userRole = "ADM")
+            MainScaffold(navController) {
+                AdminDashboardScreen(
+                    navController = navController,
+                    userRole = "ADM",
+                    initialScreen = "Visión general de operaciones"
+                )
+            }
+        }
+
+        composable("admin_users") {
+            MainScaffold(navController) {
+                AdminDashboardScreen(
+                    navController = navController,
+                    userRole = "ADM",
+                    initialScreen = "Gestión de usuarios"
+                )
+            }
         }
 
         // --- Pantallas CON barra de navegación ---
@@ -58,12 +74,12 @@ fun AppNavGraph() {
         
         composable("instantBuy/{code}") { backStackEntry ->
             val code = backStackEntry.arguments?.getString("code") ?: "USD_PEN"
-            MainScaffold(navController) { InstantBuyScreen(code) }
+            MainScaffold(navController) { InstantBuyScreen(navController, code) }
         }
         
         // Mantener la ruta sin parámetros por compatibilidad si se usa en otros lados
         composable("instantBuy") {
-            MainScaffold(navController) { InstantBuyScreen() }
+            MainScaffold(navController) { InstantBuyScreen(navController) }
         }
         
         composable("ventaInmediata/{code}") { backStackEntry ->

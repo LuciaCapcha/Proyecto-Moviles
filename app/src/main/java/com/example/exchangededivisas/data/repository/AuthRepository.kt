@@ -6,6 +6,7 @@ import com.example.exchangededivisas.data.session.AppSession
 import com.example.exchangededivisas.data.session.CurrentUser
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
+import java.security.MessageDigest
 
 object AuthRepository {
 
@@ -13,6 +14,12 @@ object AuthRepository {
 
     private fun nowIso(): String {
         return OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+    }
+
+    private fun sha256(value: String): String {
+        val bytes = MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(Charsets.UTF_8))
+        return bytes.joinToString("") { "%02x".format(it) }
     }
 
     suspend fun login(
@@ -29,7 +36,8 @@ object AuthRepository {
             val user = findUser(input)
                 ?: throw IllegalArgumentException("Credenciales inválidas")
 
-            val isPasswordValid = user.passwordHash == rawPassword
+            val hashedPassword = sha256(rawPassword)
+            val isPasswordValid = user.passwordHash == hashedPassword || user.passwordHash == rawPassword
 
             if (!isPasswordValid) {
                 registerAccess(
@@ -42,24 +50,24 @@ object AuthRepository {
             }
 
             val estado = user.estado ?: "Activo"
+            val canLogin = estado.equals("Activo", ignoreCase = true) ||
+                    estado.equals("Restringido", ignoreCase = true)
 
-            if (!estado.equals("Activo", ignoreCase = true)) {
+            if (!canLogin) {
                 registerAccess(
                     usuarioId = user.usuarioId,
                     success = false,
                     input = input,
-                    message = "Usuario no activo"
+                    message = "Usuario no habilitado"
                 )
-                throw IllegalArgumentException("Usuario no activo")
+                throw IllegalArgumentException("Usuario no habilitado")
             }
 
             val now = nowIso()
 
             api.updateUsuario(
                 usuarioId = "eq.${user.usuarioId}",
-                body = mapOf(
-                    "fechaultimoacceso" to now
-                )
+                body = mapOf("fechaultimoacceso" to now)
             )
 
             registerAccess(
@@ -78,7 +86,6 @@ object AuthRepository {
             )
 
             AppSession.setUser(currentUser)
-
             currentUser
         }
     }
@@ -118,7 +125,6 @@ object AuthRepository {
         }
     }
 
-    // crear cuenta
     suspend fun register(
         nombreUsuario: String,
         correo: String,
@@ -128,13 +134,12 @@ object AuthRepository {
         val email = correo.trim()
         val pass = password.trim()
 
-        // El correo y el usuario no deben estar repetidos
-        if (api.getUsuarioByCorreoElectronico("eq.$email").isNotEmpty())
+        if (api.getUsuarioByCorreoElectronico("eq.$email").isNotEmpty()) {
             throw IllegalArgumentException("El correo ya está registrado")
-        if (api.getUsuarioByNombreUsuario("eq.$user").isNotEmpty())
+        }
+        if (api.getUsuarioByNombreUsuario("eq.$user").isNotEmpty()) {
             throw IllegalArgumentException("El nombre de usuario ya existe")
-
-        // Buscamos el rol "Usuario" y un país por defecto
+        }
 
         val rolId = (api.getRoles().firstOrNull { it["nombre"] == "USU" }
             ?: api.getRoles().firstOrNull())
@@ -145,20 +150,28 @@ object AuthRepository {
             ?.get("paisid")?.let { (it as Number).toInt() }
             ?: throw IllegalStateException("No hay países en la base de datos")
 
-        // Creamos el usuario en la tabla
         val nuevo = api.insertUsuario(
             mapOf(
                 "rolid" to rolId,
                 "paisid" to paisId,
                 "nombreusuario" to user,
                 "correoelectronico" to email,
-                "passwordhash" to pass,
-                "estado" to "Activo"
+                "passwordhash" to sha256(pass),
+                "temavisual" to "Oscuro",
+                "estado" to "Activo",
+                "fecharegistro" to nowIso(),
+                "fechaultimoacceso" to nowIso()
             )
         ).firstOrNull() ?: throw IllegalStateException("No se pudo crear el usuario")
 
-        // Le creamos su billetera
-        runCatching { api.insertBilletera(mapOf("usuarioid" to nuevo.usuarioId)) }
+        runCatching {
+            api.insertBilletera(
+                mapOf(
+                    "usuarioid" to nuevo.usuarioId,
+                    "fechacreacion" to nowIso()
+                )
+            )
+        }
 
         val current = CurrentUser(
             usuarioId = nuevo.usuarioId,
