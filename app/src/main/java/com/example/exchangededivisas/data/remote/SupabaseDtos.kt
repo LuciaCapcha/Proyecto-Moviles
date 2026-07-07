@@ -151,7 +151,17 @@ data class MovimientoDto(
 )
 
 data class NotificacionDto(
-    @SerializedName("notificacionid") val notificacionId: Int?
+    @SerializedName("notificacionid") val notificacionId: Int?,
+    @SerializedName("usuarioid") val usuarioId: Int? = null,
+    @SerializedName("correodestino") val correoDestino: String? = null,
+    @SerializedName("tipoevento") val tipoEvento: String? = null,
+    @SerializedName("asunto") val asunto: String? = null,
+    @SerializedName("cuerpo") val cuerpo: String? = null,
+    @SerializedName("estadoenvio") val estadoEnvio: String? = null,
+    @SerializedName("fechacreacion") val fechaCreacion: String? = null,
+    @SerializedName("fechaenvio") val fechaEnvio: String? = null,
+    @SerializedName("referenciatipo") val referenciaTipo: String? = null,
+    @SerializedName("referenciaid") val referenciaId: Int? = null
 )
 
 data class HistoricoPrecioParDto(
@@ -186,8 +196,51 @@ data class HistorialTransaccionDto(
     @SerializedName("tipooperacion") val tipoOperacion: String,
     @SerializedName("referenciaid") val referenciaId: Int,
     @SerializedName("parmonedaid") val parMonedaId: Int?,
-    @SerializedName("monoid") val monedaId: Int?,
+    @SerializedName("monedaid") val monedaId: Int?,
     @SerializedName("fechahora") val fechaHora: String?,
     @SerializedName("estado") val estado: String,
     @SerializedName("metodoejecucion") val metodoEjecucion: String?
+)
+
+
+data class RestriccionUsuarioDto(
+    @SerializedName("restriccionid") val restriccionId: Int,
+    @SerializedName("usuarioid") val usuarioId: Int,
+    @SerializedName("administradorid") val administradorId: Int,
+    @SerializedName("tipoaccion") val tipoAccion: String,
+    @SerializedName("mensaje") val mensaje: String,
+    @SerializedName("fechainicio") val fechaInicio: String?,
+    @SerializedName("fechafin") val fechaFin: String?,
+    @SerializedName("estadorestriccion") val estadoRestriccion: String
+)
+
+
+
+
+data class AuditoriaAdministrativaDto(
+    @SerializedName("auditoriaid") val auditoriaId: Int,
+    @SerializedName("administradorid") val administradorId: Int,
+    @SerializedName("usuarioafectadoid") val usuarioAfectadoId: Int,
+    @SerializedName("tipoaccion") val tipoAccion: String,
+    @SerializedName("mensajeregistrado") val mensajeRegistrado: String?,
+    @SerializedName("fechahora") val fechaHora: String?
+)
+
+data class InstantBuyAtomicResultDto(
+    @SerializedName("operacionid") val operacionId: Int?,
+    @SerializedName("cantidadcomprada") val cantidadComprada: Double?,
+    @SerializedName("totalpagado") val totalPagado: Double?,
+    @SerializedName("monedaorigen") val monedaOrigen: String?,
+    @SerializedName("monedadestino") val monedaDestino: String?,
+    @SerializedName("mensaje") val mensaje: String?
+)
+
+
+data class InstantSaleAtomicResultDto(
+    @SerializedName("operacionid") val operacionId: Int?,
+    @SerializedName("cantidadvendida") val cantidadVendida: Double?,
+    @SerializedName("totalrecibido") val totalRecibido: Double?,
+    @SerializedName("monedavendida") val monedaVendida: String?,
+    @SerializedName("monedarecibida") val monedaRecibida: String?,
+    @SerializedName("mensaje") val mensaje: String?
 )

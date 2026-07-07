@@ -206,6 +206,30 @@ interface SupabaseService {
         @Body body: Map<String, @JvmSuppressWildcards Any?>
     ): List<NotificacionDto>
 
+    @GET("notificacionescorreo")
+    suspend fun getNotificacionesByUsuario(
+        @Query("usuarioid") usuarioId: String,
+        @Query("order") order: String = "notificacionid.desc",
+        @Query("limit") limit: Int = 20
+    ): List<NotificacionDto>
+
+    @GET("notificacionescorreo")
+    suspend fun getLatestUserNotification(
+        @Query("usuarioid") usuarioId: String,
+        @Query("select") select: String = "notificacionid",
+        @Query("order") order: String = "notificacionid.desc",
+        @Query("limit") limit: Int = 1
+    ): List<NotificacionDto>
+
+    @GET("notificacionescorreo")
+    suspend fun getUserNotificationsAfter(
+        @Query("usuarioid") usuarioId: String,
+        @Query("notificacionid") notificacionId: String,
+        @Query("select") select: String = "*",
+        @Query("order") order: String = "notificacionid.asc",
+        @Query("limit") limit: Int = 20
+    ): List<NotificacionDto>
+
     @GET("historicopreciospar")
     suspend fun getHistoricoByPar(
         @Query("parmonedaid") parMonedaId: String,
@@ -248,7 +272,7 @@ interface SupabaseService {
     suspend fun getHistorialByUsuario(
         @Query("usuarioid") usuarioId: String,
         @Query("order") order: String = "fechahora.desc",
-        @Query("limit") limit: Int = 20
+        @Query("limit") limit: Int = 200
     ): List<HistorialTransaccionDto>
 
     @POST("restriccionesusuario")
@@ -256,6 +280,14 @@ interface SupabaseService {
     suspend fun insertRestriccion(
         @Body body: Map<String, @JvmSuppressWildcards Any?>
     ): List<Map<String, Any?>>
+
+    @GET("restriccionesusuario")
+    suspend fun getRestriccionesActivasByUsuario(
+        @Query("usuarioid") usuarioId: String,
+        @Query("estadorestriccion") estado: String = "eq.Activa",
+        @Query("order") order: String = "fechainicio.desc",
+        @Query("limit") limit: Int = 1
+    ): List<RestriccionUsuarioDto>
 
     @POST("auditoriaadministrativa")
     @Headers("Prefer: return=representation")
@@ -294,6 +326,11 @@ interface SupabaseService {
         @Body body: Map<String, @JvmSuppressWildcards Any?>
     ): List<UsuarioDto>
 
+    @GET("ordenescompra")
+    suspend fun getAllOrdenesCompraActivas(
+        @Query("estado") estado: String = "in.(Activa,Parcialmente ejecutada)"
+    ): List<OrdenCompraDto>
+
     @GET("ofertasventa")
     suspend fun getAllOfertasActivas(
         @Query("estado") estado: String = "in.(Activa,Parcialmente ejecutada)"
@@ -305,5 +342,82 @@ interface SupabaseService {
         @Body body: Map<String, @JvmSuppressWildcards Any?>
     ): List<OrdenCompraDto>
 
-}
+    @POST("rpc/ejecutar_compra_inmediata_segura")
+    suspend fun ejecutarCompraInmediataSegura(
+        @Body body: Map<String, @JvmSuppressWildcards Any?>
+    ): InstantBuyAtomicResultDto
 
+    @POST("rpc/ejecutar_venta_inmediata_segura")
+    suspend fun ejecutarVentaInmediataSegura(
+        @Body body: Map<String, @JvmSuppressWildcards Any?>
+    ): InstantSaleAtomicResultDto
+
+    @GET("ordenescompra")
+    suspend fun getOrdenCompraById(
+        @Query("ordencompraid") ordenCompraId: String,
+        @Query("limit") limit: Int = 1
+    ): List<OrdenCompraDto>
+
+    @GET("ofertasventa")
+    suspend fun getOfertaVentaById(
+        @Query("ofertaventaid") ofertaVentaId: String,
+        @Query("limit") limit: Int = 1
+    ): List<OfertaVentaDto>
+
+    @GET("operacionesinmediatas")
+    suspend fun getOperacionInmediataById(
+        @Query("operacioninmediataid") operacionInmediataId: String,
+        @Query("limit") limit: Int = 1
+    ): List<OperacionInmediataDto>
+
+    @GET("cancelacionesordenoferta")
+    suspend fun getCancelacionById(
+        @Query("cancelacionid") cancelacionId: String,
+        @Query("limit") limit: Int = 1
+    ): List<CancelacionDto>
+
+
+
+    @GET("historialtransacciones")
+    suspend fun getHistorialDesde(
+        @Query("fechahora") fechaHora: String,
+        @Query("order") order: String = "fechahora.desc",
+        @Query("limit") limit: Int = 1000
+    ): List<HistorialTransaccionDto>
+
+    @GET("depositos")
+    suspend fun getDepositoById(
+        @Query("depositoid") depositoId: String,
+        @Query("limit") limit: Int = 1
+    ): List<DepositoDto>
+
+    @GET("retiros")
+    suspend fun getRetiroById(
+        @Query("retiroid") retiroId: String,
+        @Query("limit") limit: Int = 1
+    ): List<RetiroDto>
+
+    @GET("restriccionesusuario")
+    suspend fun getRestriccionesByUsuario(
+        @Query("usuarioid") usuarioId: String,
+        @Query("order") order: String = "fechainicio.desc",
+        @Query("limit") limit: Int = 50
+    ): List<RestriccionUsuarioDto>
+
+    @PATCH("restriccionesusuario")
+    @Headers("Prefer: return=representation")
+    suspend fun updateRestriccionesActivasByUsuario(
+        @Query("usuarioid") usuarioId: String,
+        @Query("estadorestriccion") estado: String = "eq.Activa",
+        @Body body: Map<String, @JvmSuppressWildcards Any?>
+    ): List<RestriccionUsuarioDto>
+
+
+    @GET("auditoriaadministrativa")
+    suspend fun getAuditoriaByUsuario(
+        @Query("usuarioafectadoid") usuarioAfectadoId: String,
+        @Query("order") order: String = "fechahora.desc",
+        @Query("limit") limit: Int = 50
+    ): List<AuditoriaAdministrativaDto>
+
+}

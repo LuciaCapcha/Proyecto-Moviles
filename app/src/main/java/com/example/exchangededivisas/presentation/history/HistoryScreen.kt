@@ -1,6 +1,8 @@
 package com.example.exchangededivisas.presentation.history
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -23,6 +25,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.exchangededivisas.data.model.InstantTransaction
 import com.example.exchangededivisas.data.model.OrderOrOffer
 import com.example.exchangededivisas.data.model.TransactionType
+import com.example.exchangededivisas.data.session.AppSession
 import java.time.Instant
 import java.time.ZoneId
 import java.time.LocalDate
@@ -32,48 +35,81 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun HistoryScreen(viewModel: HistoryViewModel = viewModel()) {
     val state by viewModel.state.collectAsState()
-    var selectedTabIndex by remember { mutableStateOf(0) }
-    val tabs = listOf("Órd. Compra", "Of. Venta", "Comp. Inmediata", "Vent. Inmediata")
-    val types = listOf(
-        TransactionType.BUY_ORDER, 
-        TransactionType.SELL_OFFER, 
-        TransactionType.INSTANT_BUY, 
-        TransactionType.INSTANT_SELL
+    val currentUser by AppSession.currentUser.collectAsState()
+
+    LaunchedEffect(currentUser.usuarioId) {
+        viewModel.load(currentUser.usuarioId)
+    }
+
+    val columns = listOf(
+        "Órdenes de compra" to TransactionType.BUY_ORDER,
+        "Ofertas de venta" to TransactionType.SELL_OFFER,
+        "Compras inmediatas" to TransactionType.INSTANT_BUY,
+        "Ventas inmediatas" to TransactionType.INSTANT_SELL
     )
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text(
-            text = "Historial de Transacciones",
+            text = "Historial de transacciones",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 16.dp)
+            modifier = Modifier.padding(bottom = 8.dp)
         )
 
-        ScrollableTabRow(
-            selectedTabIndex = selectedTabIndex,
-            edgePadding = 0.dp,
-            containerColor = Color.Transparent,
-            divider = {}
-        ) {
-            tabs.forEachIndexed { index, title ->
-                Tab(
-                    selected = selectedTabIndex == index,
-                    onClick = { selectedTabIndex = index },
-                    text = { Text(title, style = MaterialTheme.typography.labelLarge) }
-                )
-            }
+        Text(
+            text = "Se muestran cuatro columnas: órdenes, ofertas, compras inmediatas y ventas inmediatas.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (state.isLoading) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            Spacer(modifier = Modifier.height(12.dp))
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        if (state.errorMessage != null) {
+            Text(
+                text = state.errorMessage!!,
+                color = MaterialTheme.colorScheme.error,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
-        val currentType = types[selectedTabIndex]
-        TransactionListColumn(
-            type = currentType,
-            state = state,
-            onDateChange = { start, end -> viewModel.setDateFilter(currentType, start, end) },
-            onSortToggle = { viewModel.toggleSort(currentType) },
-            onPageChange = { delta -> viewModel.changePage(currentType, delta) }
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            columns.forEach { (title, type) ->
+                Card(
+                    modifier = Modifier
+                        .width(330.dp)
+                        .fillMaxHeight(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(
+                            text = title,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+
+                        TransactionListColumn(
+                            type = type,
+                            state = state,
+                            onDateChange = { start, end -> viewModel.setDateFilter(type, start, end) },
+                            onSortToggle = { viewModel.toggleSort(type) },
+                            onPageChange = { delta -> viewModel.changePage(type, delta) }
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -167,7 +203,9 @@ fun OrderOfferCard(tx: OrderOrOffer) {
                 Text(tx.pair, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             }
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            
+
+            TransactionDetailRow("Evento", tx.eventLabel.ifBlank { "Normal" })
+            TransactionDetailRow("Estado", tx.state.ifBlank { "-" })
             TransactionDetailRow("Precio Unit.", "%.4f".format(tx.unitPrice))
             
             Row(Modifier.fillMaxWidth()) {
@@ -204,6 +242,8 @@ fun InstantTxCard(tx: InstantTransaction) {
                 Text(tx.pair, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             }
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            TransactionDetailRow("Evento", tx.eventLabel.ifBlank { "Normal" })
+            TransactionDetailRow("Estado", tx.state.ifBlank { "-" })
             TransactionDetailRow("Precio Unit.", "%.4f".format(tx.unitPrice))
             TransactionDetailRow("Cantidad", "%.2f".format(tx.quantity))
             TransactionDetailRow("Total", "%.2f".format(tx.total))

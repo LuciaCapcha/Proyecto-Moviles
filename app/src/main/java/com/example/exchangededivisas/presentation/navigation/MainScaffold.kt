@@ -18,6 +18,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.CurrencyExchange
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
@@ -46,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.example.exchangededivisas.data.session.AppSession
+import com.example.exchangededivisas.data.notification.NativeNotificationBus
 import com.example.exchangededivisas.data.repository.ExchangeRepository
 import com.example.exchangededivisas.data.repository.WalletCurrencyUi
 
@@ -55,7 +58,7 @@ data class NavItem(
     val icon: ImageVector
 )
 
-private val navItems = listOf(
+private val baseNavItems = listOf(
     NavItem("home", "Menú", Icons.Default.Home),
     NavItem("wallet", "Billetera", Icons.Default.AccountBalanceWallet),
     NavItem("currencies", "Monedas", Icons.Default.CurrencyExchange),
@@ -73,12 +76,29 @@ fun MainScaffold(
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val currentUser by AppSession.currentUser.collectAsState()
+    val navItems = remember(currentUser.rolId) {
+        if (currentUser.rolId == 2) {
+            val logout = baseNavItems.last()
+            val normalItems = baseNavItems.dropLast(1)
+            normalItems + listOf(
+                NavItem("admin_dashboard", "Admin", Icons.Default.Analytics),
+                NavItem("admin_users", "Usuarios", Icons.Default.Group)
+            ) + logout
+        } else {
+            baseNavItems
+        }
+    }
 
     // Carga de balances
     var balances by remember { mutableStateOf<List<WalletCurrencyUi>>(emptyList()) }
     val walletTick by AppSession.walletRefreshTick.collectAsState()
 
     LaunchedEffect(currentUser.usuarioId, walletTick) {
+        if (currentUser.usuarioId <= 0) {
+            balances = emptyList()
+            return@LaunchedEffect
+        }
+
         runCatching {
             ExchangeRepository.loadWallet(currentUser.usuarioId)
         }.onSuccess { list ->
@@ -119,9 +139,11 @@ fun MainScaffold(
                                 seleccionado = currentRoute == item.route,
                                 onClick = {
                                     if (item.route == "logout") {
+                                        NativeNotificationBus.clear()
                                         AppSession.logout()
                                         navController.navigate("login") {
-                                            popUpTo(0)
+                                            popUpTo(0) { inclusive = true }
+                                            launchSingleTop = true
                                         }
                                     } else if (currentRoute != item.route) {
                                         navController.navigate(item.route) {

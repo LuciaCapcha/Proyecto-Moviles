@@ -2,20 +2,29 @@ package com.example.exchangededivisas.presentation.home
 
 import android.content.Context
 import android.graphics.Color
-import android.view.LayoutInflater
 import android.widget.TextView
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.exchangededivisas.R
@@ -28,9 +37,15 @@ import com.github.mikephil.charting.components.XAxis
 import com.github.mikephil.charting.data.Entry
 import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
+import com.github.mikephil.charting.formatter.ValueFormatter
 import com.github.mikephil.charting.highlight.Highlight
 import com.github.mikephil.charting.utils.MPPointF
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 @Composable
 fun TimeRangeSelector(
@@ -38,15 +53,16 @@ fun TimeRangeSelector(
     onRangeSelected: (String) -> Unit
 ) {
     val ranges = listOf("1d", "1w", "1m", "1y", "Todo")
+
     Row(
         modifier = Modifier.wrapContentSize(),
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         ranges.forEach { range ->
             val isSelected = range == selectedRange
+
             Surface(
-                modifier = Modifier
-                    .clickable { onRangeSelected(range) },
+                modifier = Modifier.clickable { onRangeSelected(range) },
                 shape = RoundedCornerShape(8.dp),
                 color = if (isSelected) androidx.compose.ui.graphics.Color.Black else androidx.compose.ui.graphics.Color.White,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -112,19 +128,29 @@ fun HistoricalChartCard(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                TimeRangeSelector(selectedRange, onRangeSelected)
+                TimeRangeSelector(
+                    selectedRange = selectedRange,
+                    onRangeSelected = onRangeSelected
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                val filteredData = remember(data, selectedRange) { filterByRange(data, selectedRange) }
-                key(selectedRange) { AndroidChart(filteredData) }
+                val chartState = remember(data, selectedRange) {
+                    buildChartState(data, selectedRange)
+                }
+
+                key(selectedRange, chartState.points.size, chartState.intervalMinutes) {
+                    AndroidChart(chartState)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun AndroidChart(data: CurrencyPairChartData) {
+private fun AndroidChart(
+    state: ChartState
+) {
     val blueColor = Color.BLUE
     val greenColor = Color.GREEN
 
@@ -132,6 +158,7 @@ private fun AndroidChart(data: CurrencyPairChartData) {
         factory = { context ->
             LineChart(context).apply {
                 description.isEnabled = false
+
                 setTouchEnabled(true)
                 isDragEnabled = true
                 setScaleEnabled(true)
@@ -142,6 +169,7 @@ private fun AndroidChart(data: CurrencyPairChartData) {
                 xAxis.setDrawGridLines(true)
                 xAxis.gridColor = Color.LTGRAY
                 xAxis.setDrawLabels(true)
+                xAxis.granularity = 1f
 
                 axisLeft.setDrawGridLines(true)
                 axisLeft.gridColor = Color.LTGRAY
@@ -152,18 +180,15 @@ private fun AndroidChart(data: CurrencyPairChartData) {
                 legend.horizontalAlignment = Legend.LegendHorizontalAlignment.CENTER
                 legend.orientation = Legend.LegendOrientation.HORIZONTAL
                 legend.setDrawInside(false)
-
-                val marker = ChartMarkerView(context, R.layout.chart_tooltip, data.prices)
-                marker.chartView = this
-                this.marker = marker
             }
         },
         update = { chart ->
-            val buyEntries = data.prices.mapIndexed { index, price ->
-                Entry(index.toFloat(), price.buyPrice.toFloat())
+            val buyEntries = state.points.map { point ->
+                Entry(point.x, point.price.buyPrice.toFloat())
             }
-            val sellEntries = data.prices.mapIndexed { index, price ->
-                Entry(index.toFloat(), price.sellPrice.toFloat())
+
+            val sellEntries = state.points.map { point ->
+                Entry(point.x, point.price.sellPrice.toFloat())
             }
 
             val buyDataSet = LineDataSet(buyEntries, "Compra").apply {
@@ -186,6 +211,22 @@ private fun AndroidChart(data: CurrencyPairChartData) {
                 setDrawCircleHole(false)
             }
 
+            chart.xAxis.valueFormatter = object : ValueFormatter() {
+                override fun getFormattedValue(value: Float): String {
+                    val slot = value.roundToInt().coerceAtLeast(0)
+                    val timestamp = state.firstBucket.plusMinutes(slot.toLong() * state.intervalMinutes)
+                    return timestamp.format(state.axisFormatter)
+                }
+            }
+
+            val marker = ChartMarkerView(
+                context = chart.context,
+                layoutResource = R.layout.chart_tooltip,
+                points = state.points
+            )
+            marker.chartView = chart
+            chart.marker = marker
+
             chart.data = LineData(buyDataSet, sellDataSet)
             chart.invalidate()
         },
@@ -195,27 +236,31 @@ private fun AndroidChart(data: CurrencyPairChartData) {
     )
 }
 
-class ChartMarkerView(
+private class ChartMarkerView(
     context: Context,
     layoutResource: Int,
-    private val prices: List<HistoricalPrice>
+    private val points: List<ChartPoint>
 ) : MarkerView(context, layoutResource) {
 
     private val tvDate: TextView = findViewById(R.id.tvDate)
     private val tvBuyPrice: TextView = findViewById(R.id.tvBuyPrice)
     private val tvSellPrice: TextView = findViewById(R.id.tvSellPrice)
     private val tvMargin: TextView = findViewById(R.id.tvMargin)
-    private val formatter = DateTimeFormatter.ofPattern("dd/MM HH:mm")
+
+    private val minuteFormatter = DateTimeFormatter.ofPattern("dd/MM\nHH:mm")
 
     override fun refreshContent(e: Entry?, highlight: Highlight?) {
-        val index = e?.x?.toInt() ?: 0
-        if (index >= 0 && index < prices.size) {
-            val price = prices[index]
-            tvDate.text = price.timestamp.format(formatter)
+        val x = e?.x ?: 0f
+        val point = points.minByOrNull { abs(it.x - x) }
+
+        if (point != null) {
+            val price = point.price
+            tvDate.text = price.timestamp.format(minuteFormatter)
             tvBuyPrice.text = "Compra: ${String.format("%.4f", price.buyPrice)}"
             tvSellPrice.text = "Venta: ${String.format("%.4f", price.sellPrice)}"
             tvMargin.text = "Margen: ${String.format("%.4f", price.sellPrice - price.buyPrice)}"
         }
+
         super.refreshContent(e, highlight)
     }
 
@@ -224,20 +269,98 @@ class ChartMarkerView(
     }
 }
 
-/** Recorta los precios según el rango seleccionado (1d, 1w, 1m, 1y, Todo). */
-private fun filterByRange(
+private data class ChartPoint(
+    val x: Float,
+    val price: HistoricalPrice
+)
+
+private data class ChartState(
+    val points: List<ChartPoint>,
+    val firstBucket: LocalDateTime,
+    val intervalMinutes: Long,
+    val axisFormatter: DateTimeFormatter
+)
+
+private data class BucketConfig(
+    val intervalMinutes: Long,
+    val rangeStart: (LocalDateTime) -> LocalDateTime?,
+    val axisFormatter: DateTimeFormatter
+)
+
+private fun buildChartState(
     data: CurrencyPairChartData,
     range: String
-): CurrencyPairChartData {
-    if (data.prices.isEmpty()) return data
-    val last = data.prices.maxOf { it.timestamp }
-    val cutoff = when (range) {
-        "1d" -> last.minusDays(1)
-        "1w" -> last.minusWeeks(1)
-        "1m" -> last.minusMonths(1)
-        "1y" -> last.minusYears(1)
-        else -> return data // "Todo" = sin recorte
+): ChartState {
+    val config = bucketConfig(range)
+    val ordered = data.prices.sortedBy { it.timestamp }
+    val last = ordered.maxOf { it.timestamp }
+    val cutoff = config.rangeStart(last)
+
+    val ranged = if (cutoff == null) ordered else ordered.filter { !it.timestamp.isBefore(cutoff) }
+    val safeRange = ranged.ifEmpty { ordered.takeLast(1) }
+
+    val bucketed = safeRange
+        .groupBy { bucketEnd(it.timestamp, config.intervalMinutes) }
+        .mapNotNull { (bucket, group) ->
+            val latest = group.maxByOrNull { it.timestamp } ?: return@mapNotNull null
+            latest.copy(timestamp = bucket)
+        }
+        .sortedBy { it.timestamp }
+
+    val firstBucket = bucketed.firstOrNull()?.timestamp ?: bucketEnd(last, config.intervalMinutes)
+    val points = bucketed.map { price ->
+        val minutes = java.time.Duration.between(firstBucket, price.timestamp).toMinutes()
+        val x = (minutes.toDouble() / config.intervalMinutes.toDouble()).toFloat()
+        ChartPoint(x = x, price = price)
     }
-    val filtered = data.prices.filter { !it.timestamp.isBefore(cutoff) }
-    return data.copy(prices = if (filtered.isEmpty()) data.prices else filtered)
+
+    return ChartState(
+        points = points,
+        firstBucket = firstBucket,
+        intervalMinutes = config.intervalMinutes,
+        axisFormatter = config.axisFormatter
+    )
+}
+
+private fun bucketConfig(range: String): BucketConfig {
+    return when (range) {
+        "1d" -> BucketConfig(
+            intervalMinutes = 5,
+            rangeStart = { it.minusDays(1) },
+            axisFormatter = DateTimeFormatter.ofPattern("HH:mm")
+        )
+
+        "1w" -> BucketConfig(
+            intervalMinutes = 60,
+            rangeStart = { it.minusWeeks(1) },
+            axisFormatter = DateTimeFormatter.ofPattern("dd/MM\nHH:mm")
+        )
+
+        "1m" -> BucketConfig(
+            intervalMinutes = 360,
+            rangeStart = { it.minusMonths(1) },
+            axisFormatter = DateTimeFormatter.ofPattern("dd/MM")
+        )
+
+        "1y" -> BucketConfig(
+            intervalMinutes = 10080,
+            rangeStart = { it.minusYears(1) },
+            axisFormatter = DateTimeFormatter.ofPattern("dd/MM")
+        )
+
+        else -> BucketConfig(
+            intervalMinutes = 1440,
+            rangeStart = { null },
+            axisFormatter = DateTimeFormatter.ofPattern("dd/MM")
+        )
+    }
+}
+
+private fun bucketEnd(
+    timestamp: LocalDateTime,
+    intervalMinutes: Long
+): LocalDateTime {
+    val epochMinutes = timestamp.toEpochSecond(ZoneOffset.UTC) / 60L
+    val bucket = ceil(epochMinutes.toDouble() / intervalMinutes.toDouble()).toLong() * intervalMinutes
+    return LocalDateTime.ofEpochSecond(bucket * 60L, 0, ZoneOffset.UTC)
 }

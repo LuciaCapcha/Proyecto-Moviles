@@ -8,6 +8,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -25,6 +26,7 @@ fun HomeScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val selectedRange by viewModel.selectedRange.collectAsState()
+    var showRestrictionReason by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -96,6 +98,31 @@ fun HomeScreen(
             }
 
             is HomeUiState.Success -> {
+                if (state.isRestricted) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Cuenta restringida",
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "No puedes depositar, crear órdenes/ofertas ni usar compra o venta inmediata. Aún puedes retirar fondos.",
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            TextButton(onClick = { showRestrictionReason = true }) {
+                                Text("Ver motivo")
+                            }
+                        }
+                    }
+                }
+
                 if (state.isLoadingCharts) {
                     LinearProgressIndicator(
                         modifier = Modifier.fillMaxWidth().height(2.dp),
@@ -157,5 +184,21 @@ fun HomeScreen(
         }
 
         Spacer(modifier = Modifier.height(100.dp))
+    }
+
+    val successState = uiState as? HomeUiState.Success
+    if (showRestrictionReason && successState != null) {
+        AlertDialog(
+            onDismissRequest = { showRestrictionReason = false },
+            title = { Text("Motivo de restricción") },
+            text = {
+                Text(successState.restrictionReason ?: "No hay un motivo registrado disponible en este momento.")
+            },
+            confirmButton = {
+                TextButton(onClick = { showRestrictionReason = false }) {
+                    Text("Aceptar")
+                }
+            }
+        )
     }
 }

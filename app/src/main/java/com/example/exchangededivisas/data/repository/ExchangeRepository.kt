@@ -1,6 +1,15 @@
 package com.example.exchangededivisas.data.repository
 
 import com.example.exchangededivisas.api.ApiClient
+import com.example.exchangededivisas.data.model.InstantTransaction
+import com.example.exchangededivisas.data.model.OrderOrOffer
+import com.example.exchangededivisas.data.model.TransactionType
+import com.example.exchangededivisas.data.notification.NativeNotificationBus
+import com.example.exchangededivisas.data.remote.HistorialTransaccionDto
+import com.example.exchangededivisas.data.remote.OperacionInmediataDto
+import com.example.exchangededivisas.data.remote.OrdenCompraDto
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 import com.example.exchangededivisas.data.remote.BilleteraDto
 import com.example.exchangededivisas.data.remote.MetodoPagoDto
 import com.example.exchangededivisas.data.remote.MonedaDto
@@ -76,8 +85,21 @@ data class ActiveTradeUi(
     val refundCurrency: String
 )
 
+data class HistoryDataUi(
+    val buyOrders: List<OrderOrOffer>,
+    val sellOffers: List<OrderOrOffer>,
+    val instantBuys: List<InstantTransaction>,
+    val instantSells: List<InstantTransaction>
+)
+
 private data class PlannedOfferExecution(
     val offer: OfertaVentaDto,
+    val amountTaken: Double,
+    val subtotal: Double
+)
+
+private data class PlannedBuyOrderExecution(
+    val order: OrdenCompraDto,
     val amountTaken: Double,
     val subtotal: Double
 )
@@ -85,16 +107,79 @@ private data class PlannedOfferExecution(
 object ExchangeRepository {
 
     private val api = ApiClient.supabase
-    
-    private var cachedMonedas: Map<Int, MonedaDto>? = null
-    private var cachedPares: List<ParMonedaDto>? = null
 
-    private suspend fun getMonedasCached(): Map<Int, MonedaDto> {
-        return cachedMonedas ?: api.getMonedas().associateBy { it.monedaId }.also { cachedMonedas = it }
+    private suspend fun notifyNative(
+        recipientUserId: Int,
+        title: String,
+        body: String,
+        notificationId: Int? = null
+    ) {
+        runCatching {
+            NativeNotificationBus.emitForUser(
+                recipientUserId = recipientUserId,
+                title = title,
+                body = body,
+                notificationId = notificationId
+            )
+        }
     }
 
-    private suspend fun getParesCached(): List<ParMonedaDto> {
-        return cachedPares ?: api.getAllParesMoneda().also { cachedPares = it }
+    private suspend fun dispatchPendingEmails() {
+        runCatching {
+            EmailDispatchRepository.flushPendingEmails()
+        }
+    }
+
+    private const val STATIC_CACHE_MS = 10 * 60 * 1000L
+    private const val MARKET_CACHE_MS = 8 * 1000L
+
+    private data class TimedCache<T>(
+        val value: T,
+        val timestamp: Long = System.currentTimeMillis()
+    ) {
+        fun isFresh(ttlMs: Long): Boolean = System.currentTimeMillis() - timestamp <= ttlMs
+    }
+
+    private var cachedMonedas: TimedCache<Map<Int, MonedaDto>>? = null
+    private var cachedPares: TimedCache<List<ParMonedaDto>>? = null
+    private var cachedAllOrders: TimedCache<List<OrdenCompraDto>>? = null
+    private var cachedAllOffers: TimedCache<List<OfertaVentaDto>>? = null
+    private var cachedAllPairsUi: TimedCache<List<PairUi>>? = null
+    private val chartCache = mutableMapOf<Int, TimedCache<com.example.exchangededivisas.data.model.CurrencyPairChartData>>()
+
+    private suspend fun getMonedasCached(forceRefresh: Boolean = false): Map<Int, MonedaDto> {
+        val existing = cachedMonedas
+        if (!forceRefresh && existing != null && existing.isFresh(STATIC_CACHE_MS)) return existing.value
+        return api.getMonedas().associateBy { it.monedaId }.also { cachedMonedas = TimedCache(it) }
+    }
+
+    private suspend fun getParesCached(forceRefresh: Boolean = false): List<ParMonedaDto> {
+        val existing = cachedPares
+        if (!forceRefresh && existing != null && existing.isFresh(STATIC_CACHE_MS)) return existing.value
+        return api.getAllParesMoneda().also { cachedPares = TimedCache(it) }
+    }
+
+    private suspend fun getAllOrdersCached(forceRefresh: Boolean = false): List<OrdenCompraDto> {
+        val existing = cachedAllOrders
+        if (!forceRefresh && existing != null && existing.isFresh(MARKET_CACHE_MS)) return existing.value
+        return api.getAllOrdenesCompraActivas()
+            .filter { isActiveStatus(it.estado) && it.cantidadPendiente > 0.0 }
+            .also { cachedAllOrders = TimedCache(it) }
+    }
+
+    private suspend fun getAllOffersCached(forceRefresh: Boolean = false): List<OfertaVentaDto> {
+        val existing = cachedAllOffers
+        if (!forceRefresh && existing != null && existing.isFresh(MARKET_CACHE_MS)) return existing.value
+        return api.getAllOfertasActivas()
+            .filter { isActiveStatus(it.estado) && it.cantidadPendiente > 0.0 }
+            .also { cachedAllOffers = TimedCache(it) }
+    }
+
+    private fun invalidateMarketCache() {
+        cachedAllOrders = null
+        cachedAllOffers = null
+        cachedAllPairsUi = null
+        chartCache.clear()
     }
 
     suspend fun obtenerHistoricoGrafico(parId: Int, rangoTiempo: String): List<HistoricoPrecioParDto> {
@@ -140,6 +225,25 @@ object ExchangeRepository {
                 cleanStatus.equals("Parcialmente ejecutada", ignoreCase = true)
     }
 
+    private suspend fun ensureUserCanOperate(usuarioId: Int, actionName: String) {
+        val user = api.getUsuarioById("eq.$usuarioId").firstOrNull()
+            ?: error("No se encontró el usuario.")
+
+        if (user.estado?.equals("Restringido", ignoreCase = true) == true) {
+            val reason = getActiveRestrictionReason(usuarioId).getOrNull()
+            val suffix = if (!reason.isNullOrBlank()) " Motivo: $reason" else ""
+            error("Usuario restringido: no puede $actionName.$suffix")
+        }
+    }
+
+    suspend fun getActiveRestrictionReason(usuarioId: Int): Result<String?> {
+        return runCatching {
+            api.getRestriccionesActivasByUsuario("eq.$usuarioId")
+                .firstOrNull()
+                ?.mensaje
+        }
+    }
+
     suspend fun getCurrencies(): List<WalletCurrencyUi> {
         return api.getMonedas()
             .map {
@@ -158,7 +262,7 @@ object ExchangeRepository {
             PaymentMethodUi(
                 metodoPagoId = it.metodoPagoId,
                 nombre = it.nombre,
-                comisionPorcentaje = (it.comisionPorcentaje ?: 0.0) / 100.0,
+                comisionPorcentaje = it.comisionPorcentaje ?: 0.0,
                 comisionFija = it.comisionFija ?: 0.0
             )
         }
@@ -196,6 +300,7 @@ object ExchangeRepository {
     ): Result<String> {
         return runCatching {
             require(amount > 0.0) { "Monto inválido" }
+            ensureUserCanOperate(usuarioId, "depositar dinero")
 
             val moneda = getCurrencyByCode(currencyCode)
             val metodo = getPaymentMethodByName(paymentMethodName)
@@ -254,22 +359,28 @@ object ExchangeRepository {
             val user = api.getUsuarioById("eq.$usuarioId").firstOrNull()
             val correo = user?.correoElectronico ?: "correo@pendiente.com"
 
-            api.insertNotificacionCorreo(
+            val asuntoDeposito = "Voucher de depósito Ezchange"
+            val cuerpoDeposito = "Se registró un depósito de %.2f %s. Total pagado: %.2f. Comisión: %.2f."
+                .format(amount, moneda.codigoIso.trim(), totalPaid, commission)
+
+            val depositoNotificacion = api.insertNotificacionCorreo(
                 mapOf(
                     "usuarioid" to usuarioId,
                     "tiponotificacionid" to null,
                     "correodestino" to correo,
                     "tipoevento" to "VOUCHER_DEPOSITO",
-                    "asunto" to "Voucher de depósito Ezchange",
-                    "cuerpo" to "Se registró un depósito de %.2f %s. Total pagado: %.2f. Comisión: %.2f."
-                        .format(amount, moneda.codigoIso.trim(), totalPaid, commission),
+                    "asunto" to asuntoDeposito,
+                    "cuerpo" to cuerpoDeposito,
                     "estadoenvio" to "Pendiente",
                     "fechacreacion" to now,
                     "fechaenvio" to null,
                     "referenciatipo" to "depositos",
                     "referenciaid" to deposito.depositoId
                 )
-            )
+            ).firstOrNull()
+
+            notifyNative(usuarioId, asuntoDeposito, cuerpoDeposito, depositoNotificacion?.notificacionId)
+            dispatchPendingEmails()
 
             AppSession.notifyWalletChanged()
 
@@ -290,12 +401,12 @@ object ExchangeRepository {
             val toCurrency = getCurrencyByCode(toCode)
             val pair = getPairOrThrow(fromCurrency.monedaId, toCurrency.monedaId)
 
-            val offers = getAvailableOffers(pair.parMonedaId, usuarioId)
-            val planned = planOfferExecutions(offers, amount)
+            val offers = getActiveSellOffers(pairCode).getOrThrow()
+            val planned = planSellOfferUiExecutions(offers, amount)
 
-            val covered = planned.sumOf { it.amountTaken }
-            val total = planned.sumOf { it.subtotal }
-            val prices = planned.map { it.offer.precioUnitario }
+            val covered = planned.sumOf { it.second }
+            val total = planned.sumOf { (offer, taken) -> taken * offer.price }
+            val prices = planned.map { it.first.price }
 
             val availableBalance = getAvailableBalance(usuarioId, fromCurrency.monedaId)
 
@@ -323,182 +434,45 @@ object ExchangeRepository {
     ): Result<InstantBuyReceipt> {
         return runCatching {
             require(amount > 0.0) { "Valor inválido" }
+            ensureUserCanOperate(usuarioId, "comprar inmediatamente")
 
             val (fromCode, toCode) = parsePairCode(pairCode)
             val fromCurrency = getCurrencyByCode(fromCode)
             val toCurrency = getCurrencyByCode(toCode)
             val pair = getPairOrThrow(fromCurrency.monedaId, toCurrency.monedaId)
 
-            val offers = getAvailableOffers(pair.parMonedaId, usuarioId)
-            val planned = planOfferExecutions(offers, amount)
-
-            val covered = planned.sumOf { it.amountTaken }
-            require(covered >= amount) { "Liquidez insuficiente" }
-
-            val total = planned.sumOf { it.subtotal }
-            val availableBalance = getAvailableBalance(usuarioId, fromCurrency.monedaId)
-            require(availableBalance >= total) { "Saldo insuficiente" }
-
-            val prices = planned.map { it.offer.precioUnitario }
-            val now = nowIso()
-
-            val operation = api.insertOperacionInmediata(
+            val result = api.ejecutarCompraInmediataSegura(
                 mapOf(
-                    "usuarioid" to usuarioId,
-                    "parmonedaid" to pair.parMonedaId,
-                    "tipooperacion" to "Compra inmediata",
-                    "metodoejecucion" to "Normal",
-                    "cantidadsolicitada" to amount,
-                    "cantidadejecutada" to covered,
-                    "preciominimo" to (prices.minOrNull() ?: 0.0),
-                    "preciomaximo" to (prices.maxOrNull() ?: 0.0),
-                    "preciopromedio" to if (covered > 0.0) total / covered else 0.0,
-                    "totalpagado" to total,
-                    "totalrecibido" to covered,
-                    "estado" to "Completada",
-                    "fechaoperacion" to now,
-                    "operacionpadreid" to null
-                )
-            ).first()
-
-            val (buyerFromBefore, buyerFromAfter) = subtractBalance(
-                usuarioId = usuarioId,
-                monedaId = fromCurrency.monedaId,
-                amount = total
-            )
-
-            insertWalletMovement(
-                usuarioId = usuarioId,
-                monedaId = fromCurrency.monedaId,
-                tipoMovimiento = "CompraInmediata",
-                monto = total,
-                saldoAnterior = buyerFromBefore,
-                saldoPosterior = buyerFromAfter,
-                referenciaTipo = "operacionesinmediatas",
-                referenciaId = operation.operacionInmediataId,
-                fecha = now
-            )
-
-            val (buyerToBefore, buyerToAfter) = addBalance(
-                usuarioId = usuarioId,
-                monedaId = toCurrency.monedaId,
-                delta = covered
-            )
-
-            insertWalletMovement(
-                usuarioId = usuarioId,
-                monedaId = toCurrency.monedaId,
-                tipoMovimiento = "CompraInmediata",
-                monto = covered,
-                saldoAnterior = buyerToBefore,
-                saldoPosterior = buyerToAfter,
-                referenciaTipo = "operacionesinmediatas",
-                referenciaId = operation.operacionInmediataId,
-                fecha = now
-            )
-
-            planned.forEach { execution ->
-                val offer = execution.offer
-
-                val newSold = offer.cantidadVendida + execution.amountTaken
-                val newPending = max(0.0, offer.cantidadPendiente - execution.amountTaken)
-                val newReceived = offer.totalRecibido + execution.subtotal
-
-                val newStatus = if (newPending <= 0.000001) {
-                    "Completada"
-                } else {
-                    "Parcialmente ejecutada"
-                }
-
-                api.updateOfertaVenta(
-                    ofertaVentaId = "eq.${offer.ofertaVentaId}",
-                    body = mapOf(
-                        "cantidadvendida" to newSold,
-                        "cantidadpendiente" to newPending,
-                        "totalrecibido" to newReceived,
-                        "estado" to newStatus,
-                        "fechaactualizacion" to now
-                    )
-                )
-
-                val (sellerBefore, sellerAfter) = addBalance(
-                    usuarioId = offer.usuarioId,
-                    monedaId = fromCurrency.monedaId,
-                    delta = execution.subtotal
-                )
-
-                insertWalletMovement(
-                    usuarioId = offer.usuarioId,
-                    monedaId = fromCurrency.monedaId,
-                    tipoMovimiento = "VentaInmediata",
-                    monto = execution.subtotal,
-                    saldoAnterior = sellerBefore,
-                    saldoPosterior = sellerAfter,
-                    referenciaTipo = "operacionesinmediatas",
-                    referenciaId = operation.operacionInmediataId,
-                    fecha = now
-                )
-
-                val seller = api.getUsuarioById("eq.${offer.usuarioId}").firstOrNull()
-                val sellerEmail = seller?.correoElectronico ?: "correo@pendiente.com"
-
-                api.insertNotificacionCorreo(
-                    mapOf(
-                        "usuarioid" to offer.usuarioId,
-                        "tiponotificacionid" to null,
-                        "correodestino" to sellerEmail,
-                        "tipoevento" to "PROGRESO_OFERTA",
-                        "asunto" to "Tu oferta recibió una compra",
-                        "cuerpo" to "Se ejecutaron %.2f %s de tu oferta. Recibiste %.2f %s."
-                            .format(
-                                execution.amountTaken,
-                                toCurrency.codigoIso.trim(),
-                                execution.subtotal,
-                                fromCurrency.codigoIso.trim()
-                            ),
-                        "estadoenvio" to "Pendiente",
-                        "fechacreacion" to now,
-                        "fechaenvio" to null,
-                        "referenciatipo" to "operacionesinmediatas",
-                        "referenciaid" to operation.operacionInmediataId
-                    )
-                )
-
-                api.insertHistorial(
-                    mapOf(
-                        "usuarioid" to offer.usuarioId,
-                        "tipooperacion" to "Venta inmediata",
-                        "referenciaid" to operation.operacionInmediataId,
-                        "parmonedaid" to pair.parMonedaId,
-                        "monedaid" to null,
-                        "fechahora" to now,
-                        "estado" to "Completada",
-                        "metodoejecucion" to "Normal"
-                    )
-                )
-            }
-
-            api.insertHistorial(
-                mapOf(
-                    "usuarioid" to usuarioId,
-                    "tipooperacion" to "Compra inmediata",
-                    "referenciaid" to operation.operacionInmediataId,
-                    "parmonedaid" to pair.parMonedaId,
-                    "monedaid" to null,
-                    "fechahora" to now,
-                    "estado" to "Completada",
-                    "metodoejecucion" to "Normal"
+                    "p_usuarioid" to usuarioId,
+                    "p_parmonedaid" to pair.parMonedaId,
+                    "p_cantidad" to amount
                 )
             )
 
+            val operationId = result.operacionId
+                ?: error(result.mensaje ?: "No se pudo ejecutar la compra inmediata.")
+
+            invalidateMarketCache()
             AppSession.notifyWalletChanged()
 
+            notifyNative(
+                usuarioId,
+                "Compra inmediata completada",
+                "Compraste %.4f %s por %.4f %s.".format(
+                    result.cantidadComprada ?: amount,
+                    result.monedaDestino ?: toCurrency.codigoIso.trim(),
+                    result.totalPagado ?: 0.0,
+                    result.monedaOrigen ?: fromCurrency.codigoIso.trim()
+                )
+            )
+            dispatchPendingEmails()
+
             InstantBuyReceipt(
-                operationId = operation.operacionInmediataId,
-                boughtAmount = covered,
-                paidTotal = total,
-                fromCurrency = fromCurrency.codigoIso.trim(),
-                toCurrency = toCurrency.codigoIso.trim()
+                operationId = operationId,
+                boughtAmount = result.cantidadComprada ?: amount,
+                paidTotal = result.totalPagado ?: 0.0,
+                fromCurrency = result.monedaOrigen ?: fromCurrency.codigoIso.trim(),
+                toCurrency = result.monedaDestino ?: toCurrency.codigoIso.trim()
             )
         }
     }
@@ -673,10 +647,138 @@ object ExchangeRepository {
                 )
             )
 
+            api.insertHistorial(
+                mapOf(
+                    "usuarioid" to usuarioId,
+                    "tipooperacion" to if (item.type == ActiveTradeType.BUY_ORDER) "Orden de compra" else "Oferta de venta",
+                    "referenciaid" to item.id,
+                    "parmonedaid" to item.pairId,
+                    "monedaid" to refundCurrencyId,
+                    "fechahora" to now,
+                    "estado" to "Cancelada",
+                    "metodoejecucion" to "Cancelación"
+                )
+            )
+
+            invalidateMarketCache()
             AppSession.notifyWalletChanged()
 
             "Operación cancelada. Se reembolsaron %.2f %s."
                 .format(item.refundAmount, item.refundCurrency)
+        }
+    }
+
+    suspend fun loadTransactionHistory(usuarioId: Int): Result<HistoryDataUi> {
+        return runCatching {
+            val history = api.getHistorialByUsuario("eq.$usuarioId", limit = 200)
+
+            val buyOrders = mutableListOf<OrderOrOffer>()
+            val sellOffers = mutableListOf<OrderOrOffer>()
+            val instantBuys = mutableListOf<InstantTransaction>()
+            val instantSells = mutableListOf<InstantTransaction>()
+
+            history.forEach { item ->
+                when (item.tipoOperacion) {
+                    "Orden de compra" -> mapHistoryOrder(item, TransactionType.BUY_ORDER)?.let { buyOrders.add(it) }
+                    "Oferta de venta" -> mapHistoryOffer(item, TransactionType.SELL_OFFER)?.let { sellOffers.add(it) }
+                    "Compra inmediata" -> mapHistoryInstant(item, TransactionType.INSTANT_BUY)?.let { instantBuys.add(it) }
+                    "Venta inmediata" -> mapHistoryInstant(item, TransactionType.INSTANT_SELL)?.let { instantSells.add(it) }
+                }
+            }
+
+            HistoryDataUi(
+                buyOrders = buyOrders,
+                sellOffers = sellOffers,
+                instantBuys = instantBuys,
+                instantSells = instantSells
+            )
+        }
+    }
+
+    private suspend fun mapHistoryOrder(
+        history: HistorialTransaccionDto,
+        type: TransactionType
+    ): OrderOrOffer? {
+        val order = api.getOrdenCompraById("eq.${history.referenciaId}").firstOrNull() ?: return null
+        val pairText = getPairText(order.parMonedaId)
+        return OrderOrOffer(
+            id = "H-${history.historialId}",
+            date = parseHistoryDate(history.fechaHora),
+            pair = pairText,
+            unitPrice = order.precioUnitario,
+            originalQuantity = order.cantidadOriginal,
+            originalTotal = order.totalComprometido,
+            executedQuantity = order.cantidadObtenida,
+            executedTotal = order.totalEjecutado,
+            remainingQuantity = order.cantidadPendiente,
+            remainingTotal = max(0.0, order.totalComprometido - order.totalEjecutado),
+            type = type,
+            state = history.estado,
+            eventLabel = history.metodoEjecucion ?: "Normal"
+        )
+    }
+
+    private suspend fun mapHistoryOffer(
+        history: HistorialTransaccionDto,
+        type: TransactionType
+    ): OrderOrOffer? {
+        val offer = api.getOfertaVentaById("eq.${history.referenciaId}").firstOrNull() ?: return null
+        val pairText = getPairText(offer.parMonedaId)
+        return OrderOrOffer(
+            id = "H-${history.historialId}",
+            date = parseHistoryDate(history.fechaHora),
+            pair = pairText,
+            unitPrice = offer.precioUnitario,
+            originalQuantity = offer.cantidadOriginal,
+            originalTotal = offer.totalEsperado,
+            executedQuantity = offer.cantidadVendida,
+            executedTotal = offer.totalRecibido,
+            remainingQuantity = offer.cantidadPendiente,
+            remainingTotal = offer.cantidadPendiente * offer.precioUnitario,
+            type = type,
+            state = history.estado,
+            eventLabel = history.metodoEjecucion ?: "Normal"
+        )
+    }
+
+    private suspend fun mapHistoryInstant(
+        history: HistorialTransaccionDto,
+        type: TransactionType
+    ): InstantTransaction? {
+        val operation = api.getOperacionInmediataById("eq.${history.referenciaId}").firstOrNull() ?: return null
+        val pairText = getPairText(operation.parMonedaId)
+        val quantity = operation.cantidadEjecutada
+        val total = when (type) {
+            TransactionType.INSTANT_BUY -> operation.totalPagado ?: 0.0
+            TransactionType.INSTANT_SELL -> operation.totalRecibido ?: 0.0
+            else -> 0.0
+        }
+        return InstantTransaction(
+            id = "H-${history.historialId}",
+            date = parseHistoryDate(history.fechaHora),
+            pair = pairText,
+            unitPrice = operation.precioPromedio ?: 0.0,
+            quantity = quantity,
+            total = total,
+            type = type,
+            state = history.estado,
+            eventLabel = history.metodoEjecucion ?: "Normal"
+        )
+    }
+
+    private suspend fun getPairText(pairId: Int): String {
+        val pair = api.getParMonedaById("eq.$pairId").firstOrNull() ?: return "Par $pairId"
+        val from = getMonedasCached()[pair.monedaOrigenId]?.codigoIso?.trim() ?: "?"
+        val to = getMonedasCached()[pair.monedaDestinoId]?.codigoIso?.trim() ?: "?"
+        return "$from → $to"
+    }
+
+    private fun parseHistoryDate(value: String?): LocalDateTime {
+        if (value.isNullOrBlank()) return LocalDateTime.now()
+        return runCatching {
+            OffsetDateTime.parse(value).toLocalDateTime()
+        }.getOrElse {
+            runCatching { LocalDateTime.parse(value.take(19)) }.getOrDefault(LocalDateTime.now())
         }
     }
 
@@ -721,12 +823,12 @@ object ExchangeRepository {
         buyerId: Int
     ): List<OfertaVentaDto> {
         return api.getOfertasVentaByPair("eq.$pairId")
-            .filter { it.usuarioId != buyerId }
             .filter { it.cantidadPendiente > 0.0 }
             .filter { isActiveStatus(it.estado) }
             .sortedWith(
                 compareBy<OfertaVentaDto> { it.precioUnitario }
                     .thenBy { it.fechaCreacion ?: "" }
+                    .thenBy { it.ofertaVentaId }
             )
     }
 
@@ -754,6 +856,78 @@ object ExchangeRepository {
         }
 
         return planned
+    }
+
+    private fun planSellOfferUiExecutions(
+        offers: List<SellOfferUi>,
+        requestedAmount: Double
+    ): List<Pair<SellOfferUi, Double>> {
+        var remaining = requestedAmount
+        val planned = mutableListOf<Pair<SellOfferUi, Double>>()
+        for (offer in offers) {
+            if (remaining <= 0.0) break
+            val taken = minOf(remaining, offer.quantity)
+            planned.add(offer to taken)
+            remaining -= taken
+        }
+        return planned
+    }
+
+    private fun planBuyOrderUiExecutions(
+        orders: List<BuyOrderUi>,
+        requestedAmount: Double
+    ): List<Pair<BuyOrderUi, Double>> {
+        var remaining = requestedAmount
+        val planned = mutableListOf<Pair<BuyOrderUi, Double>>()
+        for (order in orders) {
+            if (remaining <= 0.0) break
+            val taken = minOf(remaining, order.quantity)
+            planned.add(order to taken)
+            remaining -= taken
+        }
+        return planned
+    }
+
+    private suspend fun getAvailableBuyOrders(pairId: Int): List<OrdenCompraDto> {
+        return api.getOrdenesCompraByPair("eq.$pairId")
+            .filter { it.cantidadPendiente > 0.0 }
+            .filter { isActiveStatus(it.estado) }
+            .sortedWith(
+                compareByDescending<OrdenCompraDto> { it.precioUnitario }
+                    .thenBy { it.fechaCreacion ?: "" }
+                    .thenBy { it.ordenCompraId }
+            )
+    }
+
+    private fun planBuyOrderExecutions(
+        orders: List<OrdenCompraDto>,
+        requestedAmount: Double
+    ): List<PlannedBuyOrderExecution> {
+        var remaining = requestedAmount
+        val planned = mutableListOf<PlannedBuyOrderExecution>()
+
+        for (order in orders) {
+            if (remaining <= 0.0) break
+
+            val taken = minOf(remaining, order.cantidadPendiente)
+            planned.add(
+                PlannedBuyOrderExecution(
+                    order = order,
+                    amountTaken = taken,
+                    subtotal = taken * order.precioUnitario
+                )
+            )
+
+            remaining -= taken
+        }
+
+        return planned
+    }
+
+    private suspend fun getInversePair(pair: ParMonedaDto): ParMonedaDto? {
+        return getParesCached().firstOrNull {
+            it.monedaOrigenId == pair.monedaDestinoId && it.monedaDestinoId == pair.monedaOrigenId
+        }
     }
 
     private suspend fun getAvailableBalance(
@@ -864,39 +1038,47 @@ object ExchangeRepository {
     }
 
     suspend fun loadHomeData(usuarioId: Int): HomeData = coroutineScope {
-        // 1. Obtener datos base en paralelo
-        val paresDeferred = async { try { api.getAllParesMoneda() } catch(e: Exception) { emptyList() } }
-        val monedasDeferred = async { try { api.getMonedas() } catch(e: Exception) { emptyList() } }
-        val userOrdersDeferred = async { try { api.getOrdenesCompraByUser("eq.$usuarioId") } catch(e: Exception) { emptyList() } }
-        val userOffersDeferred = async { try { api.getOfertasVentaByUser("eq.$usuarioId") } catch(e: Exception) { emptyList() } }
+        val currentUser = runCatching { api.getUsuarioById("eq.$usuarioId").firstOrNull() }.getOrNull()
+        val isRestricted = currentUser?.estado?.equals("Restringido", ignoreCase = true) == true
+        val restrictionReason = if (isRestricted) getActiveRestrictionReason(usuarioId).getOrNull() else null
 
-        val allPairs = paresDeferred.await()
-        val allMonedas = monedasDeferred.await().associateBy { it.monedaId }
-        val userOrders = userOrdersDeferred.await()
-        val userOffers = userOffersDeferred.await()
+        val allPairs = getAllPairs().getOrDefault(emptyList())
+            .filter { it.volume > 0.0 }
+            .sortedByDescending { it.volume }
 
-        // 2. Determinar par más activo del usuario
-        val userParCounts = mutableMapOf<Int, Int>()
-        userOrders.forEach { userParCounts[it.parMonedaId] = (userParCounts[it.parMonedaId] ?: 0) + 1 }
-        userOffers.forEach { userParCounts[it.parMonedaId] = (userParCounts[it.parMonedaId] ?: 0) + 1 }
-        val userTopParId = userParCounts.maxByOrNull { it.value }?.key
+        var globalChart: com.example.exchangededivisas.data.model.CurrencyPairChartData? = null
+        for (pair in allPairs) {
+            val chart = getPairChartData("${pair.fromCode}_${pair.toCode}").getOrNull()
+            if (chart != null && chart.prices.isNotEmpty()) {
+                globalChart = chart
+                break
+            }
+        }
 
-        // 3. Par global destacado (tomamos el primero disponible para evitar N peticiones de volumen)
-        val globalParId = allPairs.firstOrNull()?.parMonedaId
+        val recentPairIds = getRecentPairIds(usuarioId)
+        val paresById = getParesCached().associateBy { it.parMonedaId }
+        val monedas = getMonedasCached()
+        var userChart: com.example.exchangededivisas.data.model.CurrencyPairChartData? = null
 
-        // 4. Cargar gráficos para global y usuario en paralelo
-        val globalChartDeferred = globalParId?.let { async { buildChartDataOptimized(it, allMonedas) } }
-        val userChartDeferred = if (userTopParId != null && userTopParId != globalParId) {
-            async { buildChartDataOptimized(userTopParId, allMonedas) }
-        } else null
-
-        val globalChart = globalChartDeferred?.await()
-        val userChart = if (userTopParId == globalParId) globalChart else userChartDeferred?.await()
+        for (pairId in recentPairIds) {
+            val pair = paresById[pairId] ?: continue
+            val fromCode = monedas[pair.monedaOrigenId]?.codigoIso?.trim() ?: continue
+            val toCode = monedas[pair.monedaDestinoId]?.codigoIso?.trim() ?: continue
+            val chart = getPairChartData("${fromCode}_${toCode}").getOrNull()
+            if (chart != null && chart.prices.isNotEmpty()) {
+                userChart = chart
+                break
+            }
+        }
 
         HomeData(
             globalMostActive = globalChart,
-            userMostActive = userChart ?: globalChart,
-            hasUserActivity = userTopParId != null
+            userMostActive = userChart ?: allPairs.drop(1).firstNotNullOfOrNull { pair ->
+                getPairChartData("${pair.fromCode}_${pair.toCode}").getOrNull()?.takeIf { it.prices.isNotEmpty() }
+            } ?: globalChart,
+            hasUserActivity = recentPairIds.isNotEmpty(),
+            isRestricted = isRestricted,
+            restrictionReason = restrictionReason
         )
     }
 
@@ -904,6 +1086,9 @@ object ExchangeRepository {
         parId: Int,
         monedasMap: Map<Int, MonedaDto>
     ): com.example.exchangededivisas.data.model.CurrencyPairChartData {
+        val cached = chartCache[parId]
+        if (cached != null && cached.isFresh(MARKET_CACHE_MS)) return cached.value
+
         val par = api.getParMonedaById("eq.$parId").firstOrNull()
             ?: return com.example.exchangededivisas.data.model.CurrencyPairChartData("?", "?", emptyList())
 
@@ -914,7 +1099,7 @@ object ExchangeRepository {
             api.getHistoricoByPar(
                 parMonedaId = "eq.$parId",
                 order = "fecharegistro.asc",
-                limit = 35 // Reducido para carga más rápida
+                limit = 1000
             )
         } catch (e: Exception) { emptyList() }
 
@@ -928,13 +1113,17 @@ object ExchangeRepository {
             } catch (e: Exception) { null }
         }
 
-        return com.example.exchangededivisas.data.model.CurrencyPairChartData(fromCode, toCode, prices)
+        val data = com.example.exchangededivisas.data.model.CurrencyPairChartData(fromCode, toCode, prices)
+        chartCache[parId] = TimedCache(data)
+        return data
     }
 
     data class HomeData(
         val globalMostActive: com.example.exchangededivisas.data.model.CurrencyPairChartData?,
         val userMostActive: com.example.exchangededivisas.data.model.CurrencyPairChartData?,
-        val hasUserActivity: Boolean
+        val hasUserActivity: Boolean,
+        val isRestricted: Boolean = false,
+        val restrictionReason: String? = null
     )
     // ── PARES DE MONEDAS ─────────────────────────────────────────────────────
 
@@ -999,40 +1188,59 @@ object ExchangeRepository {
         val netReceived: Double
     )
 
-    /** Carga todos los pares — OPTIMIZADO: 3 llamadas en total, no una por par */
-    suspend fun getAllPairs(): Result<List<PairUi>> {
+    /** Carga todos los pares con puntas directas + espejo inverso.
+     * Volumen se expresa siempre en la moneda destino del par visible.
+     */
+    suspend fun getAllPairs(forceRefresh: Boolean = false): Result<List<PairUi>> {
         return runCatching {
-            val monedas = api.getMonedas().associateBy { it.monedaId }
-            val pares   = api.getAllParesMoneda()
+            val cached = cachedAllPairsUi
+            if (!forceRefresh && cached != null && cached.isFresh(MARKET_CACHE_MS)) return@runCatching cached.value
 
-            // Traemos TODAS las ofertas activas en UNA sola llamada y agrupamos en memoria
-            val offersByPair = runCatching { api.getAllOfertasActivas() }
-                .getOrElse { emptyList() }
-                .filter { isActiveStatus(it.estado) }
-                .groupBy { it.parMonedaId }
+            val monedas = getMonedasCached(forceRefresh)
+            val pares = getParesCached(forceRefresh)
+            val pairBySides = pares.associateBy { it.monedaOrigenId to it.monedaDestinoId }
+            val offersByPair = getAllOffersCached(forceRefresh).groupBy { it.parMonedaId }
+            val ordersByPair = getAllOrdersCached(forceRefresh).groupBy { it.parMonedaId }
 
-            pares.mapNotNull { par ->
-                val from = monedas[par.monedaOrigenId]  ?: return@mapNotNull null
-                val to   = monedas[par.monedaDestinoId] ?: return@mapNotNull null
+            val result = pares.mapNotNull { par ->
+                val from = monedas[par.monedaOrigenId] ?: return@mapNotNull null
+                val to = monedas[par.monedaDestinoId] ?: return@mapNotNull null
+                val inverse = pairBySides[par.monedaDestinoId to par.monedaOrigenId]
 
-                val parOffers = offersByPair[par.parMonedaId].orEmpty()
-                val bestSell = parOffers.minByOrNull { it.precioUnitario }?.precioUnitario
-                val bestBuy  = bestSell?.let { it * 0.99 }
-                val volume   = parOffers.sumOf { it.cantidadPendiente }
-                val margin   = if (bestBuy != null && bestSell != null) bestSell - bestBuy else null
+                val directOffers = offersByPair[par.parMonedaId].orEmpty()
+                val directOrders = ordersByPair[par.parMonedaId].orEmpty()
+                val inverseOffers = inverse?.let { offersByPair[it.parMonedaId].orEmpty() }.orEmpty()
+                val inverseOrders = inverse?.let { ordersByPair[it.parMonedaId].orEmpty() }.orEmpty()
+
+                val visibleSellPrices = directOffers.map { it.precioUnitario } +
+                        inverseOrders.mapNotNull { if (it.precioUnitario > 0.0) 1.0 / it.precioUnitario else null }
+                val visibleBuyPrices = directOrders.map { it.precioUnitario } +
+                        inverseOffers.mapNotNull { if (it.precioUnitario > 0.0) 1.0 / it.precioUnitario else null }
+
+                val bestSell = visibleSellPrices.minOrNull()
+                val bestBuy = visibleBuyPrices.maxOrNull()
+                val margin = if (bestBuy != null && bestSell != null) bestSell - bestBuy else null
+
+                val directVolumeDestino = directOffers.sumOf { it.cantidadPendiente } + directOrders.sumOf { it.cantidadPendiente }
+                val mirroredVolumeDestino = inverseOffers.sumOf { it.cantidadPendiente * it.precioUnitario } +
+                        inverseOrders.sumOf { it.cantidadPendiente * it.precioUnitario }
+                val volume = directVolumeDestino + mirroredVolumeDestino
 
                 PairUi(
                     parMonedaId = par.parMonedaId,
-                    fromCode    = from.codigoIso.trim(),
-                    toCode      = to.codigoIso.trim(),
-                    fromName    = from.nombre,
-                    toName      = to.nombre,
-                    bestBuy     = bestBuy,
-                    bestSell    = bestSell,
-                    margin      = margin,
-                    volume      = volume
+                    fromCode = from.codigoIso.trim(),
+                    toCode = to.codigoIso.trim(),
+                    fromName = from.nombre,
+                    toName = to.nombre,
+                    bestBuy = bestBuy,
+                    bestSell = bestSell,
+                    margin = margin,
+                    volume = volume
                 )
             }
+
+            cachedAllPairsUi = TimedCache(result)
+            result
         }
     }
 
@@ -1045,7 +1253,12 @@ object ExchangeRepository {
         }.getOrElse { emptyList() }
     }
 
-    /** Historial de precios real de un par para el gráfico */
+    /** Historial de precios real de un par para el gráfico.
+     *
+     * Si el par directo no tiene snapshots, intenta usar el par inverso e invierte
+     * los precios. Así USD/PEN puede graficarse aunque los snapshots originales
+     * hayan sido generados desde PEN/USD.
+     */
     suspend fun getPairChartData(
         pairCode: String
     ): Result<com.example.exchangededivisas.data.model.CurrencyPairChartData> {
@@ -1055,22 +1268,68 @@ object ExchangeRepository {
             val to   = getCurrencyByCode(toCode)
             val pair = getPairOrThrow(from.monedaId, to.monedaId)
 
-            val allMonedas = api.getMonedas().associateBy { it.monedaId }
-            buildChartDataOptimized(pair.parMonedaId, allMonedas)
+            val allMonedas = getMonedasCached()
+            val direct = buildChartDataOptimized(pair.parMonedaId, allMonedas)
+            if (direct.prices.isNotEmpty()) return@runCatching direct
+
+            val inverse = getInversePair(pair)
+            val result = if (inverse != null) {
+                val inverseData = buildChartDataOptimized(inverse.parMonedaId, allMonedas)
+                val inverted = inverseData.prices.mapNotNull { point ->
+                    if (point.buyPrice <= 0.0 || point.sellPrice <= 0.0) null
+                    else com.example.exchangededivisas.data.model.HistoricalPrice(
+                        timestamp = point.timestamp,
+                        buyPrice = 1.0 / point.sellPrice,
+                        sellPrice = 1.0 / point.buyPrice
+                    )
+                }
+                com.example.exchangededivisas.data.model.CurrencyPairChartData(
+                    baseCurrency = from.codigoIso.trim(),
+                    quoteCurrency = to.codigoIso.trim(),
+                    prices = inverted
+                )
+            } else {
+                direct
+            }
+
+            if (result.prices.isNotEmpty()) return@runCatching result
+
+            val current = getAllPairs(forceRefresh = true).getOrDefault(emptyList())
+                .firstOrNull { it.fromCode == from.codigoIso.trim() && it.toCode == to.codigoIso.trim() }
+
+            if (current?.bestBuy != null && current.bestSell != null) {
+                com.example.exchangededivisas.data.model.CurrencyPairChartData(
+                    baseCurrency = from.codigoIso.trim(),
+                    quoteCurrency = to.codigoIso.trim(),
+                    prices = listOf(
+                        com.example.exchangededivisas.data.model.HistoricalPrice(
+                            timestamp = LocalDateTime.now(),
+                            buyPrice = current.bestBuy,
+                            sellPrice = current.bestSell
+                        )
+                    )
+                )
+            } else {
+                result
+            }
         }
     }
 
-    /** Ofertas de venta activas de un par (libro de órdenes) */
+    /** Ofertas de venta activas de un par (libro de órdenes).
+     *
+     * Incluye el espejo de las órdenes de compra del par inverso.
+     * Ejemplo: una orden PEN -> USD se ve como oferta USD -> PEN con precio 1/precio.
+     */
     suspend fun getActiveSellOffers(pairCode: String): Result<List<SellOfferUi>> {
         return runCatching {
             val (fromCode, toCode) = parsePairCode(pairCode)
             val from = getCurrencyByCode(fromCode)
             val to   = getCurrencyByCode(toCode)
             val pair = getPairOrThrow(from.monedaId, to.monedaId)
+            val inversePair = getInversePair(pair)
 
-            api.getOfertasVentaByPair("eq.${pair.parMonedaId}")
-                .filter { isActiveStatus(it.estado) }
-                .sortedBy { it.precioUnitario }
+            val directOffers = api.getOfertasVentaByPair("eq.${pair.parMonedaId}")
+                .filter { isActiveStatus(it.estado) && it.cantidadPendiente > 0.0 }
                 .map {
                     SellOfferUi(
                         ofertaId = it.ofertaVentaId,
@@ -1079,20 +1338,42 @@ object ExchangeRepository {
                         total    = it.cantidadPendiente * it.precioUnitario
                     )
                 }
+
+            val mirroredOrders = inversePair?.let { inv ->
+                api.getOrdenesCompraByPair("eq.${inv.parMonedaId}")
+                    .filter { isActiveStatus(it.estado) && it.cantidadPendiente > 0.0 && it.precioUnitario > 0.0 }
+                    .map {
+                        val invertedPrice = 1.0 / it.precioUnitario
+                        val visibleQuantity = it.cantidadPendiente * it.precioUnitario
+                        SellOfferUi(
+                            ofertaId = -it.ordenCompraId,
+                            quantity = visibleQuantity,
+                            price    = invertedPrice,
+                            total    = visibleQuantity * invertedPrice
+                        )
+                    }
+            }.orEmpty()
+
+            (directOffers + mirroredOrders)
+                .sortedWith(compareBy<SellOfferUi> { it.price }.thenBy { it.ofertaId })
         }
     }
 
-    /** Órdenes de compra activas de un par (libro de órdenes) */
+    /** Órdenes de compra activas de un par (libro de órdenes).
+     *
+     * Incluye el espejo de las ofertas de venta del par inverso.
+     * Ejemplo: una oferta PEN -> USD se ve como orden USD -> PEN con precio 1/precio.
+     */
     suspend fun getActiveBuyOrders(pairCode: String): Result<List<BuyOrderUi>> {
         return runCatching {
             val (fromCode, toCode) = parsePairCode(pairCode)
             val from = getCurrencyByCode(fromCode)
             val to   = getCurrencyByCode(toCode)
             val pair = getPairOrThrow(from.monedaId, to.monedaId)
+            val inversePair = getInversePair(pair)
 
-            api.getOrdenesCompraByPair("eq.${pair.parMonedaId}")
-                .filter { isActiveStatus(it.estado) }
-                .sortedByDescending { it.precioUnitario }
+            val directOrders = api.getOrdenesCompraByPair("eq.${pair.parMonedaId}")
+                .filter { isActiveStatus(it.estado) && it.cantidadPendiente > 0.0 }
                 .map {
                     BuyOrderUi(
                         ordenId  = it.ordenCompraId,
@@ -1101,6 +1382,24 @@ object ExchangeRepository {
                         total    = it.cantidadPendiente * it.precioUnitario
                     )
                 }
+
+            val mirroredOffers = inversePair?.let { inv ->
+                api.getOfertasVentaByPair("eq.${inv.parMonedaId}")
+                    .filter { isActiveStatus(it.estado) && it.cantidadPendiente > 0.0 && it.precioUnitario > 0.0 }
+                    .map {
+                        val invertedPrice = 1.0 / it.precioUnitario
+                        val visibleQuantity = it.cantidadPendiente * it.precioUnitario
+                        BuyOrderUi(
+                            ordenId  = -it.ofertaVentaId,
+                            quantity = visibleQuantity,
+                            price    = invertedPrice,
+                            total    = visibleQuantity * invertedPrice
+                        )
+                    }
+            }.orEmpty()
+
+            (directOrders + mirroredOffers)
+                .sortedWith(compareByDescending<BuyOrderUi> { it.price }.thenBy { it.ordenId })
         }
     }
 
@@ -1114,17 +1413,18 @@ object ExchangeRepository {
         return runCatching {
             require(amount > 0.0) { "Cantidad inválida" }
             require(price > 0.0)  { "Precio inválido" }
+            ensureUserCanOperate(usuarioId, "generar ofertas de venta")
 
             val (fromCode, toCode) = parsePairCode(pairCode)
             val from = getCurrencyByCode(fromCode)
             val to   = getCurrencyByCode(toCode)
             val pair = getPairOrThrow(from.monedaId, to.monedaId)
 
-            val available = getAvailableBalance(usuarioId, from.monedaId)
+            val available = getAvailableBalance(usuarioId, to.monedaId)
             require(available >= amount) { "Saldo insuficiente" }
 
             val now = nowIso()
-            val (before, after) = subtractBalance(usuarioId, from.monedaId, amount)
+            val (before, after) = subtractBalance(usuarioId, to.monedaId, amount)
 
             val oferta = api.insertOfertaVenta(
                 mapOf(
@@ -1145,7 +1445,7 @@ object ExchangeRepository {
             ).first()
 
             insertWalletMovement(
-                usuarioId, from.monedaId, "OfertaVenta", amount,
+                usuarioId, to.monedaId, "OfertaVenta", amount,
                 before, after, "ofertasventa", oferta.ofertaVentaId, now
             )
 
@@ -1162,21 +1462,27 @@ object ExchangeRepository {
 
             val correo = api.getUsuarioById("eq.$usuarioId").firstOrNull()
                 ?.correoElectronico ?: "correo@pendiente.com"
-            api.insertNotificacionCorreo(mapOf(
+            val asuntoOferta = "Tu oferta de venta fue registrada"
+            val cuerpoOferta = "Oferta de %.4f %s a precio %.4f %s creada correctamente."
+                .format(amount, to.codigoIso.trim(), price, from.codigoIso.trim())
+            val ofertaNotificacion = api.insertNotificacionCorreo(mapOf(
                 "usuarioid"         to usuarioId,
                 "tiponotificacionid" to null,
                 "correodestino"     to correo,
                 "tipoevento"        to "OFERTA_CREADA",
-                "asunto"            to "Tu oferta de venta fue registrada",
-                "cuerpo"            to "Oferta de %.4f %s a precio %.4f %s creada correctamente."
-                    .format(amount, from.codigoIso.trim(), price, to.codigoIso.trim()),
+                "asunto"            to asuntoOferta,
+                "cuerpo"            to cuerpoOferta,
                 "estadoenvio"       to "Pendiente",
                 "fechacreacion"     to now,
                 "fechaenvio"        to null,
                 "referenciatipo"    to "ofertasventa",
                 "referenciaid"      to oferta.ofertaVentaId
-            ))
+            )).firstOrNull()
 
+            notifyNative(usuarioId, asuntoOferta, cuerpoOferta, ofertaNotificacion?.notificacionId)
+            dispatchPendingEmails()
+
+            invalidateMarketCache()
             AppSession.notifyWalletChanged()
         }
     }
@@ -1191,6 +1497,7 @@ object ExchangeRepository {
         return runCatching {
             require(amount > 0.0) { "Cantidad inválida" }
             require(price > 0.0)  { "Precio inválido" }
+            ensureUserCanOperate(usuarioId, "generar órdenes de compra")
 
             val (fromCode, toCode) = parsePairCode(pairCode)
             val from = getCurrencyByCode(fromCode)
@@ -1240,21 +1547,27 @@ object ExchangeRepository {
 
             val correo = api.getUsuarioById("eq.$usuarioId").firstOrNull()
                 ?.correoElectronico ?: "correo@pendiente.com"
-            api.insertNotificacionCorreo(mapOf(
+            val asuntoOrden = "Tu orden de compra fue registrada"
+            val cuerpoOrden = "Orden de %.4f %s a precio %.4f %s creada correctamente."
+                .format(amount, to.codigoIso.trim(), price, from.codigoIso.trim())
+            val ordenNotificacion = api.insertNotificacionCorreo(mapOf(
                 "usuarioid"          to usuarioId,
                 "tiponotificacionid" to null,
                 "correodestino"      to correo,
                 "tipoevento"         to "ORDEN_CREADA",
-                "asunto"             to "Tu orden de compra fue registrada",
-                "cuerpo"             to "Orden de %.4f %s a precio %.4f %s creada correctamente."
-                    .format(amount, from.codigoIso.trim(), price, to.codigoIso.trim()),
+                "asunto"             to asuntoOrden,
+                "cuerpo"             to cuerpoOrden,
                 "estadoenvio"        to "Pendiente",
                 "fechacreacion"      to now,
                 "fechaenvio"         to null,
                 "referenciatipo"     to "ordenescompra",
                 "referenciaid"       to orden.ordenCompraId
-            ))
+            )).firstOrNull()
 
+            notifyNative(usuarioId, asuntoOrden, cuerpoOrden, ordenNotificacion?.notificacionId)
+            dispatchPendingEmails()
+
+            invalidateMarketCache()
             AppSession.notifyWalletChanged()
         }
     }
@@ -1267,41 +1580,38 @@ object ExchangeRepository {
     ): Result<InstantSalePreview> {
         return runCatching {
             require(amount > 0.0) { "Valor inválido" }
+            ensureUserCanOperate(usuarioId, "vender inmediatamente")
+
             val (baseCode, quoteCode) = parsePairCode(pairCode)
             val base  = getCurrencyByCode(baseCode)
             val quote = getCurrencyByCode(quoteCode)
-            val pair  = getPairOrThrow(base.monedaId, quote.monedaId)
 
-            // Para venta inmediata el usuario entrega BASE y recibe QUOTE
-            // Consume las órdenes de compra activas del mercado que mejor paguen
-            val offers = api.getOfertasVentaByPair("eq.${pair.parMonedaId}")
-                .filter { isActiveStatus(it.estado) && it.usuarioId != usuarioId }
-                .sortedByDescending { it.precioUnitario }
+            val orders = getActiveBuyOrders(pairCode).getOrThrow()
+            val planned = planBuyOrderUiExecutions(orders, amount)
 
-            val planned      = planOfferExecutions(offers, amount)
-            val covered      = planned.sumOf { it.amountTaken }
-            val totalReceive = planned.sumOf { it.subtotal }
-            val prices       = planned.map { it.offer.precioUnitario }
-            val available    = getAvailableBalance(usuarioId, base.monedaId)
+            val covered = planned.sumOf { it.second }
+            val totalReceive = planned.sumOf { (order, taken) -> taken * order.price }
+            val prices = planned.map { it.first.price }
+            val available = getAvailableBalance(usuarioId, quote.monedaId)
 
             InstantSalePreview(
-                pairCode         = "${base.codigoIso.trim()}_${quote.codigoIso.trim()}",
-                baseCurrency     = base.codigoIso.trim(),
-                quoteCurrency    = quote.codigoIso.trim(),
-                requestedAmount  = amount,
-                coveredAmount    = covered,
-                totalToReceive   = totalReceive,
-                minPrice         = prices.minOrNull() ?: 0.0,
-                maxPrice         = prices.maxOrNull() ?: 0.0,
-                avgPrice         = if (covered > 0.0) totalReceive / covered else 0.0,
+                pairCode = "${base.codigoIso.trim()}_${quote.codigoIso.trim()}",
+                baseCurrency = base.codigoIso.trim(),
+                quoteCurrency = quote.codigoIso.trim(),
+                requestedAmount = amount,
+                coveredAmount = covered,
+                totalToReceive = totalReceive,
+                minPrice = prices.minOrNull() ?: 0.0,
+                maxPrice = prices.maxOrNull() ?: 0.0,
+                avgPrice = if (covered > 0.0) totalReceive / covered else 0.0,
                 availableBalance = available,
-                hasLiquidity     = covered >= amount,
+                hasLiquidity = covered >= amount,
                 hasEnoughBalance = available >= amount
             )
         }
     }
 
-    /** Ejecuta la venta inmediata contra las ofertas activas del mercado */
+    /** Ejecuta la venta inmediata de forma transaccional en Supabase. */
     suspend fun executeInstantSale(
         usuarioId: Int,
         pairCode: String,
@@ -1309,135 +1619,154 @@ object ExchangeRepository {
     ): Result<InstantSaleReceipt> {
         return runCatching {
             require(amount > 0.0) { "Valor inválido" }
+            ensureUserCanOperate(usuarioId, "vender inmediatamente")
+
             val (baseCode, quoteCode) = parsePairCode(pairCode)
             val base  = getCurrencyByCode(baseCode)
             val quote = getCurrencyByCode(quoteCode)
             val pair  = getPairOrThrow(base.monedaId, quote.monedaId)
 
-            val offers = api.getOfertasVentaByPair("eq.${pair.parMonedaId}")
-                .filter { isActiveStatus(it.estado) && it.usuarioId != usuarioId }
-                .sortedByDescending { it.precioUnitario }
+            val result = api.ejecutarVentaInmediataSegura(
+                mapOf(
+                    "p_usuarioid" to usuarioId,
+                    "p_parmonedaid" to pair.parMonedaId,
+                    "p_cantidad" to amount
+                )
+            )
 
-            val planned      = planOfferExecutions(offers, amount)
-            val covered      = planned.sumOf { it.amountTaken }
-            require(covered >= amount) { "Liquidez insuficiente" }
+            val operationId = result.operacionId
+                ?: error(result.mensaje ?: "No se pudo ejecutar la venta inmediata.")
 
-            val totalReceive = planned.sumOf { it.subtotal }
-            val available    = getAvailableBalance(usuarioId, base.monedaId)
-            require(available >= amount) { "Saldo insuficiente" }
-
-            val prices = planned.map { it.offer.precioUnitario }
-            val now    = nowIso()
-
-            val operation = api.insertOperacionInmediata(mapOf(
-                "usuarioid"         to usuarioId,
-                "parmonedaid"       to pair.parMonedaId,
-                "tipooperacion"     to "Venta inmediata",
-                "metodoejecucion"   to "Normal",
-                "cantidadsolicitada" to amount,
-                "cantidadejecutada" to covered,
-                "preciominimo"      to (prices.minOrNull() ?: 0.0),
-                "preciomaximo"      to (prices.maxOrNull() ?: 0.0),
-                "preciopromedio"    to if (covered > 0.0) totalReceive / covered else 0.0,
-                "totalpagado"       to amount,
-                "totalrecibido"     to totalReceive,
-                "estado"            to "Completada",
-                "fechaoperacion"    to now,
-                "operacionpadreid"  to null
-            )).first()
-
-            val (sbBefore, sbAfter) = subtractBalance(usuarioId, base.monedaId, amount)
-            insertWalletMovement(usuarioId, base.monedaId, "VentaInmediata", amount,
-                sbBefore, sbAfter, "operacionesinmediatas", operation.operacionInmediataId, now)
-
-            val (sqBefore, sqAfter) = addBalance(usuarioId, quote.monedaId, totalReceive)
-            insertWalletMovement(usuarioId, quote.monedaId, "VentaInmediata", totalReceive,
-                sqBefore, sqAfter, "operacionesinmediatas", operation.operacionInmediataId, now)
-
-            planned.forEach { execution ->
-                val offer      = execution.offer
-                val newPending = max(0.0, offer.cantidadPendiente - execution.amountTaken)
-                api.updateOfertaVenta("eq.${offer.ofertaVentaId}", mapOf(
-                    "cantidadvendida"    to offer.cantidadVendida + execution.amountTaken,
-                    "cantidadpendiente"  to newPending,
-                    "estado"             to if (newPending <= 0.000001) "Completada" else "Parcialmente ejecutada",
-                    "fechaactualizacion" to now
-                ))
-                val buyerEmail = api.getUsuarioById("eq.${offer.usuarioId}").firstOrNull()
-                    ?.correoElectronico ?: "correo@pendiente.com"
-                api.insertNotificacionCorreo(mapOf(
-                    "usuarioid" to offer.usuarioId, "tiponotificacionid" to null,
-                    "correodestino" to buyerEmail, "tipoevento" to "PROGRESO_OFERTA",
-                    "asunto" to "Tu oferta recibio una venta",
-                    "cuerpo" to "Se ejecutaron %.2f %s de tu oferta."
-                        .format(execution.amountTaken, base.codigoIso.trim()),
-                    "estadoenvio" to "Pendiente", "fechacreacion" to now,
-                    "fechaenvio" to null, "referenciatipo" to "operacionesinmediatas",
-                    "referenciaid" to operation.operacionInmediataId
-                ))
-            }
-
-            api.insertHistorial(mapOf(
-                "usuarioid" to usuarioId, "tipooperacion" to "Venta inmediata",
-                "referenciaid" to operation.operacionInmediataId,
-                "parmonedaid" to pair.parMonedaId, "monedaid" to null,
-                "fechahora" to now, "estado" to "Completada", "metodoejecucion" to "Normal"
-            ))
-
+            invalidateMarketCache()
             AppSession.notifyWalletChanged()
-            InstantSaleReceipt(operation.operacionInmediataId, covered, totalReceive,
-                base.codigoIso.trim(), quote.codigoIso.trim())
+
+            notifyNative(
+                usuarioId,
+                "Venta inmediata completada",
+                "Vendiste %.4f %s y recibiste %.4f %s.".format(
+                    result.cantidadVendida ?: amount,
+                    result.monedaVendida ?: base.codigoIso.trim(),
+                    result.totalRecibido ?: 0.0,
+                    result.monedaRecibida ?: quote.codigoIso.trim()
+                )
+            )
+            dispatchPendingEmails()
+
+            InstantSaleReceipt(
+                operationId = operationId,
+                soldAmount = result.cantidadVendida ?: amount,
+                receivedTotal = result.totalRecibido ?: 0.0,
+                baseCurrency = result.monedaRecibida ?: base.codigoIso.trim(),
+                quoteCurrency = result.monedaVendida ?: quote.codigoIso.trim()
+            )
         }
     }
 
-    /** Ejecuta retiro descontando saldo real de la billetera */
+    /** Ejecuta retiro descontando saldo real de la billetera. La comisión se calcula por moneda. */
     suspend fun executeWithdraw(
         usuarioId: Int,
         items: List<WithdrawItem>,
         metodoPagoId: Int,
-        comisionPorcentaje: Double
+        comisionPorcentaje: Double,
+        comisionFija: Double = 0.0
     ): Result<WithdrawReceipt> {
         return runCatching {
             require(items.isNotEmpty()) { "Selecciona al menos una moneda" }
-            items.forEach { require(it.amount > 0.0) { "Monto invalido para ${it.code}" } }
+            items.forEach {
+                require(it.amount > 0.0) { "Monto inválido" }
+            }
 
-            val now      = nowIso()
-            val subtotal = items.sumOf { it.amount }
-            val commission = subtotal * comisionPorcentaje
-            val net      = subtotal - commission
+            val now = nowIso()
+
+            var totalCommission = 0.0
+            var totalNetReceived = 0.0
 
             items.forEach { item ->
-                val (before, after) = subtractBalance(usuarioId, item.monedaId, item.amount)
-                val comisionItem = item.amount * comisionPorcentaje
-                val retiro = api.insertRetiro(mapOf(
-                    "usuarioid"          to usuarioId,
-                    "monedaid"           to item.monedaId,
-                    "metodopagoid"       to metodoPagoId,
-                    "montoretirado"      to item.amount,
-                    "comisionaplicada"   to comisionItem,
-                    "montofinalrecibido" to (item.amount - comisionItem),
-                    "estado"             to "Completada",
-                    "voucherurl"         to null,
-                    "fecharetiro"        to now
-                )).first()
+                val (before, after) = subtractBalance(
+                    usuarioId = usuarioId,
+                    monedaId = item.monedaId,
+                    amount = item.amount
+                )
 
-                insertWalletMovement(usuarioId, item.monedaId, "Retiro", item.amount,
-                    before, after, "retiros", retiro.retiroId, now)
+                val comisionItem = item.amount * (comisionPorcentaje / 100.0) + comisionFija
+                val netItem = max(0.0, item.amount - comisionItem)
 
-                api.insertHistorial(mapOf(
-                    "usuarioid"       to usuarioId,
-                    "tipooperacion"   to "Retiro",
-                    "referenciaid"    to retiro.retiroId,
-                    "parmonedaid"     to null,
-                    "monedaid"        to item.monedaId,
-                    "fechahora"       to now,
-                    "estado"          to "Completada",
-                    "metodoejecucion" to "Normal"
-                ))
+                totalCommission += comisionItem
+                totalNetReceived += netItem
+
+                val retiro = api.insertRetiro(
+                    mapOf(
+                        "usuarioid" to usuarioId,
+                        "monedaid" to item.monedaId,
+                        "metodopagoid" to metodoPagoId,
+                        "montoretirado" to item.amount,
+                        "comisionaplicada" to comisionItem,
+                        "montofinalrecibido" to netItem,
+                        "estado" to "Completada",
+                        "voucherurl" to null,
+                        "fecharetiro" to now
+                    )
+                ).first()
+
+                insertWalletMovement(
+                    usuarioId = usuarioId,
+                    monedaId = item.monedaId,
+                    tipoMovimiento = "Retiro",
+                    monto = item.amount,
+                    saldoAnterior = before,
+                    saldoPosterior = after,
+                    referenciaTipo = "retiros",
+                    referenciaId = retiro.retiroId,
+                    fecha = now
+                )
+
+                api.insertHistorial(
+                    mapOf(
+                        "usuarioid" to usuarioId,
+                        "tipooperacion" to "Retiro",
+                        "referenciaid" to retiro.retiroId,
+                        "parmonedaid" to null,
+                        "monedaid" to item.monedaId,
+                        "fechahora" to now,
+                        "estado" to "Completada",
+                        "metodoejecucion" to "Normal"
+                    )
+                )
+
+                val user = api.getUsuarioById("eq.$usuarioId").firstOrNull()
+                val correo = user?.correoElectronico ?: "correo@pendiente.com"
+
+                val asuntoRetiro = "Voucher de retiro Ezchange"
+                val cuerpoRetiro = "Se registró un retiro de %.2f %s. Comisión: %.2f. Monto final recibido: %.2f."
+                    .format(item.amount, item.code, comisionItem, netItem)
+
+                val retiroNotificacion = api.insertNotificacionCorreo(
+                    mapOf(
+                        "usuarioid" to usuarioId,
+                        "tiponotificacionid" to null,
+                        "correodestino" to correo,
+                        "tipoevento" to "VOUCHER_RETIRO",
+                        "asunto" to asuntoRetiro,
+                        "cuerpo" to cuerpoRetiro,
+                        "estadoenvio" to "Pendiente",
+                        "fechacreacion" to now,
+                        "fechaenvio" to null,
+                        "referenciatipo" to "retiros",
+                        "referenciaid" to retiro.retiroId
+                    )
+                ).firstOrNull()
+
+                notifyNative(usuarioId, asuntoRetiro, cuerpoRetiro, retiroNotificacion?.notificacionId)
+                dispatchPendingEmails()
             }
 
             AppSession.notifyWalletChanged()
-            WithdrawReceipt(items.associate { it.code to it.amount }, commission, net)
+
+            WithdrawReceipt(
+                totalWithdrawn = items.associate { it.code to it.amount },
+                commission = totalCommission,
+                netReceived = totalNetReceived
+            )
         }
     }
 }

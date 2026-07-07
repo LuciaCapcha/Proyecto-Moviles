@@ -97,8 +97,7 @@ fun RegisterScreen(navController: NavController) {
     val isFormValid = name.length >= 2 &&
             Patterns.EMAIL_ADDRESS.matcher(email).matches() &&
             password.length >= 8 &&
-            confirmPassword == password &&
-            aceptaTerminos
+            confirmPassword == password
 
     // Fuerza de la contraseña (solo visual, no bloquea)
     val fuerza = calcularFuerza(password)

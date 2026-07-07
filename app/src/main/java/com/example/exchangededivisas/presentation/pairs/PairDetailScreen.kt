@@ -25,6 +25,7 @@ import com.example.exchangededivisas.data.repository.ExchangeRepository
 import com.example.exchangededivisas.data.session.AppSession
 import com.example.exchangededivisas.presentation.home.HistoricalChartCard
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import java.time.LocalDateTime
 import kotlin.random.Random
 
@@ -44,8 +45,10 @@ fun PairDetailScreen(navController: NavController, code: String) {
     val base      = codes.getOrNull(0) ?: "USD"
     val quote     = codes.getOrNull(1) ?: "PEN"
 
-    // Saldo del usuario en la moneda base (real desde Supabase)
-    var userBalance by remember { mutableStateOf(0.0) }
+    // Saldos reales del usuario para operar.
+    // En un par A -> B, una orden de compra compromete A y una oferta/venta inmediata compromete B.
+    var baseBalance by remember { mutableStateOf(0.0) }
+    var quoteBalance by remember { mutableStateOf(0.0) }
 
     // Gráfico: datos reales de historicopreciospar
     var chartData    by remember { mutableStateOf<CurrencyPairChartData?>(null) }
@@ -61,9 +64,10 @@ fun PairDetailScreen(navController: NavController, code: String) {
     LaunchedEffect(code) {
         chartLoading = true
 
-        // Saldo real
+        // Saldos reales
         val wallet = ExchangeRepository.loadWallet(user.usuarioId)
-        userBalance = wallet.find { it.code == base }?.balance ?: 0.0
+        baseBalance = wallet.find { it.code == base }?.balance ?: 0.0
+        quoteBalance = wallet.find { it.code == quote }?.balance ?: 0.0
 
         // Historial de precios real (tabla historicopreciospar)
         ExchangeRepository.getPairChartData(code)
@@ -76,14 +80,12 @@ fun PairDetailScreen(navController: NavController, code: String) {
         chartLoading = false
     }
 
-    // Cargar ofertas activas cuando se abre la sección de operaciones
-    LaunchedEffect(showOperations, code) {
-        if (!showOperations) return@LaunchedEffect
-        offersLoading = true
-        
+    suspend fun refreshOrderBookAndChart(showSpinner: Boolean = false) {
+        if (showSpinner) offersLoading = true
+
         val sellResult = ExchangeRepository.getActiveSellOffers(code)
         val buyResult = ExchangeRepository.getActiveBuyOrders(code)
-        
+
         if (sellResult.isSuccess && buyResult.isSuccess) {
             sellOffers = sellResult.getOrThrow()
             buyOrders = buyResult.getOrThrow()
@@ -91,11 +93,28 @@ fun PairDetailScreen(navController: NavController, code: String) {
         } else {
             offersError = sellResult.exceptionOrNull()?.message ?: buyResult.exceptionOrNull()?.message
         }
-        
+
+        ExchangeRepository.getPairChartData(code)
+            .onSuccess { data ->
+                chartData = if (data.prices.isNotEmpty()) data else generateFallbackChart(base, quote, code)
+            }
+
         offersLoading = false
     }
 
+    // Cargar y refrescar el libro desde que se abre la pantalla.
+    // Aunque el usuario oculte la sección, conservamos los datos para que Mayor/Menor/Margen no queden en N/A.
+    LaunchedEffect(code) {
+        refreshOrderBookAndChart(showSpinner = true)
+
+        while (true) {
+            delay(2500)
+            refreshOrderBookAndChart(showSpinner = false)
+        }
+    }
+
     val minSell = sellOffers.minByOrNull { it.price }?.price ?: 0.0
+    val maxBuy = buyOrders.maxByOrNull { it.price }?.price ?: 0.0
 
     // Diálogo de generar oferta de venta
     if (showSellOfferDialog) {
@@ -103,17 +122,15 @@ fun PairDetailScreen(navController: NavController, code: String) {
             baseCurrency     = base,
             quoteCurrency    = quote,
             currentMinSell   = minSell,
-            availableBalance = userBalance,
+            availableBalance = quoteBalance,
             onDismiss        = { showSellOfferDialog = false },
             onConfirm        = { amount, price ->
                 showSellOfferDialog = false
                 scope.launch {
                     ExchangeRepository.createSellOffer(user.usuarioId, code, amount, price)
                         .onSuccess {
-                            userBalance -= amount
-                            // Recargar libro de órdenes
-                            ExchangeRepository.getActiveSellOffers(code)
-                                .onSuccess { sellOffers = it }
+                            quoteBalance -= amount
+                            refreshOrderBookAndChart(showSpinner = false)
                             Toast.makeText(context,
                                 "Oferta generada. Se envio notificacion al correo.",
                                 Toast.LENGTH_LONG).show()
@@ -132,15 +149,16 @@ fun PairDetailScreen(navController: NavController, code: String) {
         BuyOrderDialog(
             baseCurrency     = base,
             quoteCurrency    = quote,
-            currentMinSell   = minSell,
-            availableBalance = userBalance,
+            currentBestBuy   = maxBuy,
+            availableBalance = baseBalance,
             onDismiss        = { showBuyOrderDialog = false },
             onConfirm        = { amount, price ->
                 showBuyOrderDialog = false
                 scope.launch {
                     ExchangeRepository.createBuyOrder(user.usuarioId, code, amount, price)
                         .onSuccess {
-                            userBalance -= amount * price
+                            baseBalance -= amount * price
+                            refreshOrderBookAndChart(showSpinner = false)
                             Toast.makeText(context,
                                 "Orden de compra generada. Se envio notificacion al correo.",
                                 Toast.LENGTH_LONG).show()
@@ -182,21 +200,19 @@ fun PairDetailScreen(navController: NavController, code: String) {
             }
         }
 
-        // Texto grande: mayor compra (azul), menor venta (verde), margen (naranja)
-        chartData?.let { data ->
-            val mayorCompra = data.prices.maxOfOrNull { it.buyPrice }
-            val menorVenta  = data.prices.minOfOrNull { it.sellPrice }
-            val margen = if (mayorCompra != null && menorVenta != null) menorVenta - mayorCompra else null
+        // Texto grande: se calcula desde la cima real del libro de órdenes, no desde el gráfico.
+        val mayorCompra = buyOrders.maxOfOrNull { it.price }
+        val menorVenta = sellOffers.minOfOrNull { it.price }
+        val margen = if (mayorCompra != null && menorVenta != null) menorVenta - mayorCompra else null
 
-            Spacer(modifier = Modifier.height(20.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                BigStat("Mayor compra", mayorCompra, androidx.compose.ui.graphics.Color(0xFF2F80FF))
-                BigStat("Menor venta", menorVenta, androidx.compose.ui.graphics.Color(0xFF22C55E))
-                BigStat("Margen", margen, androidx.compose.ui.graphics.Color(0xFFFF9800))
-            }
+        Spacer(modifier = Modifier.height(20.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            BigStat("Mayor compra", mayorCompra, androidx.compose.ui.graphics.Color(0xFF2F80FF))
+            BigStat("Menor venta", menorVenta, androidx.compose.ui.graphics.Color(0xFF22C55E))
+            BigStat("Margen", margen, androidx.compose.ui.graphics.Color(0xFFFF9800))
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -327,7 +343,7 @@ fun SellOfferDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column {
-                    Text("Cantidad de $baseCurrency", style = MaterialTheme.typography.labelMedium)
+                    Text("Cantidad de $quoteCurrency a vender", style = MaterialTheme.typography.labelMedium)
                     OutlinedTextField(
                         value = amountText, onValueChange = { amountText = it },
                         modifier = Modifier.fillMaxWidth(),
@@ -342,8 +358,8 @@ fun SellOfferDialog(
                 }
                 Column {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Precio Unitario ($quoteCurrency)", style = MaterialTheme.typography.labelMedium)
-                        Text("Actual: %.4f".format(currentMinSell),
+                        Text("Precio unitario ($baseCurrency por $quoteCurrency)", style = MaterialTheme.typography.labelMedium)
+                        Text("Menor venta actual: %.4f".format(currentMinSell),
                             style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                     }
                     OutlinedTextField(
@@ -361,8 +377,8 @@ fun SellOfferDialog(
                     shape  = RoundedCornerShape(12.dp)
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Total: %.4f $quoteCurrency".format(total), fontWeight = FontWeight.Bold)
-                        Text("Saldo disponible: %.4f $baseCurrency".format(availableBalance),
+                        Text("Total esperado: %.4f $baseCurrency".format(total), fontWeight = FontWeight.Bold)
+                        Text("Saldo disponible: %.4f $quoteCurrency".format(availableBalance),
                             fontSize = 12.sp, color = Color.Gray)
                     }
                 }
@@ -400,13 +416,13 @@ private fun BigStat(label: String, value: Double?, color: androidx.compose.ui.gr
 fun BuyOrderDialog(
     baseCurrency: String,
     quoteCurrency: String,
-    currentMinSell: Double,
+    currentBestBuy: Double,
     availableBalance: Double,
     onDismiss: () -> Unit,
     onConfirm: (amount: Double, price: Double) -> Unit
 ) {
     var amountText by remember { mutableStateOf("") }
-    var priceText  by remember { mutableStateOf("%.4f".format(currentMinSell)) }
+    var priceText  by remember { mutableStateOf("%.4f".format(currentBestBuy)) }
 
     val amount = amountText.replace(",", ".").toDoubleOrNull() ?: 0.0
     val price  = priceText.replace(",", ".").toDoubleOrNull()  ?: 0.0
@@ -432,7 +448,7 @@ fun BuyOrderDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column {
-                    Text("Cantidad de $baseCurrency a comprar", style = MaterialTheme.typography.labelMedium)
+                    Text("Cantidad de $quoteCurrency a comprar", style = MaterialTheme.typography.labelMedium)
                     OutlinedTextField(
                         value = amountText, onValueChange = { amountText = it },
                         modifier = Modifier.fillMaxWidth(),
@@ -447,8 +463,8 @@ fun BuyOrderDialog(
                 }
                 Column {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Precio Unitario ($quoteCurrency)", style = MaterialTheme.typography.labelMedium)
-                        Text("Actual: %.4f".format(currentMinSell),
+                        Text("Precio unitario ($baseCurrency por $quoteCurrency)", style = MaterialTheme.typography.labelMedium)
+                        Text("Mayor compra actual: %.4f".format(currentBestBuy),
                             style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                     }
                     OutlinedTextField(

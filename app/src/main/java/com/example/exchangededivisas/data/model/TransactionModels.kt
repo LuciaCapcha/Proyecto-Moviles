@@ -20,7 +20,9 @@ data class OrderOrOffer(
     val executedTotal: Double,
     val remainingQuantity: Double,
     val remainingTotal: Double,
-    val type: TransactionType
+    val type: TransactionType,
+    val state: String = "",
+    val eventLabel: String = ""
 ) : Transaction(id, date, pair, unitPrice)
 
 data class InstantTransaction(
@@ -30,7 +32,9 @@ data class InstantTransaction(
     override val unitPrice: Double,
     val quantity: Double,
     val total: Double,
-    val type: TransactionType
+    val type: TransactionType,
+    val state: String = "",
+    val eventLabel: String = ""
 ) : Transaction(id, date, pair, unitPrice)
 
 enum class TransactionType {
